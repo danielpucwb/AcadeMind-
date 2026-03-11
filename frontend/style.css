@@ -579,3 +579,133 @@ table.tabela {
   .grid-disciplinas { grid-template-columns: 1fr; }
   .modal-box { padding: 20px; }
 }
+
+/* ── Badge PROCESSANDO — animação de pulse ── */
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .55; }
+}
+.badge-processando {
+  background: var(--cor-info-bg);
+  color: var(--cor-info);
+  animation: badgePulse 1.4s ease-in-out infinite;
+}
+
+/* ── Progresso inline no item de material ── */
+.progresso-material {
+  margin-top: 6px;
+}
+.progresso-material .barra-progresso-container {
+  height: 5px;
+  margin-top: 0;
+}
+.progresso-msg {
+  display: block;
+  font-size: .71rem;
+  color: var(--cor-info);
+  margin-top: 3px;
+}
+
+/* ── Bloco de erro no item de material ── */
+.erro-material {
+  margin-top: 5px;
+}
+.erro-resumo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: .78rem;
+  color: var(--cor-erro);
+}
+.link-ver-log {
+  font-size: .7rem;
+  color: var(--cinza-400);
+  cursor: pointer;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  line-height: 1;
+}
+.link-ver-log:hover { color: var(--cinza-600); }
+.erro-detalhe {
+  display: none;
+  font-family: var(--fonte-mono);
+  font-size: .72rem;
+  color: var(--cinza-600);
+  margin-top: 5px;
+  padding: 8px 10px;
+  background: var(--cinza-50);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--raio);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.erro-detalhe.visivel { display: block; }
+
+/* ── Zona de upload inline (no painel de materiais) ── */
+.zona-upload-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 2px dashed var(--cinza-200);
+  border-radius: var(--raio-lg);
+  background: var(--cinza-50);
+  cursor: pointer;
+  transition: border-color var(--transicao), background var(--transicao);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.zona-upload-inline:hover,
+.zona-upload-inline.drag-over {
+  border-color: var(--cor-primaria);
+  background: var(--cor-primaria-claro);
+}
+.zona-upload-inline input[type=file] { display: none; }
+.zona-upload-inline .icone-upload-sm { font-size: 1.4rem; flex-shrink: 0; }
+.zona-upload-inline .texto-upload { flex: 1; min-width: 140px; }
+.zona-upload-inline .texto-upload strong { font-size: .88rem; color: var(--cinza-700); }
+.link-selecionar { color: var(--cor-primaria); text-decoration: underline; }
+.tipos-aceitos {
+  font-size: .71rem;
+  color: var(--cinza-400);
+  display: block;
+  margin-top: 2px;
+}
+.upload-progresso-outer { margin-bottom: 12px; }
+
+/* ── Lista de arquivos sendo enviados ── */
+.upload-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.upload-arquivo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .82rem;
+  color: var(--cinza-700);
+  padding: 3px 0;
+}
+.upload-arquivo-nome {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upload-arquivo-status { flex-shrink: 0; font-size: .85rem; }
+
+/* ── Label de tipo no item de material ── */
+.material-tipo-label {
+  font-size: .72rem;
+  color: var(--cinza-400);
+  margin-left: 2px;
+}

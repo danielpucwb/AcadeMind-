@@ -383,6 +383,45 @@ async def download_material(
 
 
 # ---------------------------------------------------------------------------
+# POST /materiais/{mat_id}/reprocessar — reprocessa material com ERRO
+# ---------------------------------------------------------------------------
+@router_mat.post("/{material_id}/reprocessar", response_model=MensagemOut)
+async def reprocessar_material(
+    material_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Reinicia o processamento de um material com status ERRO.
+    Reseta o status para PENDENTE e dispara a tarefa em background.
+    """
+    material = await _get_material_ou_404(db, material_id)
+
+    if material.tipo in _TIPOS_SEM_PROCESSAMENTO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PDF e TXT não precisam de processamento.",
+        )
+    if material.status == StatusMaterial.PROCESSANDO:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Material já está sendo processado.",
+        )
+
+    material.status = StatusMaterial.PENDENTE
+    material.erro_mensagem = None
+    await db.commit()
+
+    background_tasks.add_task(
+        transcrever_material,
+        material_id=material_id,
+        disciplina_id=material.disciplina_id,
+    )
+
+    return MensagemOut(mensagem=f"Reprocessamento de '{material.nome_original}' iniciado.")
+
+
+# ---------------------------------------------------------------------------
 # GET /materiais/{mat_id}/transcricao/download — TXT/PDF gerado
 # ---------------------------------------------------------------------------
 @router_mat.get("/{material_id}/transcricao/download")

@@ -5,9 +5,10 @@
  * Sem dependências externas — vanilla JS puro.
  *
  * Módulos:
- *   API      — wrapper fetch para a API REST
+ *   API      — wrapper fetch + XHR upload com progresso
  *   Toast    — notificações de feedback
  *   Modal    — diálogo genérico com suporte a ESC
+ *   WS       — gerencia conexões WebSocket de progresso por material
  *   App      — roteador e controlador de views
  *   Views    — renderiza cada "página"
  */
@@ -15,18 +16,18 @@
 'use strict';
 
 /* ============================================================
-   API — wrapper fetch
+   API — wrapper fetch + XHR para upload com progresso
    ============================================================ */
 const API = (() => {
   const BASE = '/api/v1';
 
-  async function req(method, path, body, isForm = false) {
+  async function req(method, path, body) {
     const opts = { method, headers: {} };
-    if (body && !isForm) {
+    if (body instanceof FormData) {
+      opts.body = body;
+    } else if (body) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
-    } else if (body instanceof FormData) {
-      opts.body = body;
     }
     const res = await fetch(BASE + path, opts);
     if (!res.ok) {
@@ -38,13 +39,40 @@ const API = (() => {
     return res.json();
   }
 
+  /**
+   * Upload via XHR para obter eventos de progresso reais.
+   * onProgresso(pct: number) é chamado a cada tick de progresso.
+   */
+  function uploadXHR(path, formData, onProgresso) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', BASE + path);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgresso(Math.round(e.loaded / e.total * 100));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch { reject(new Error('Resposta inválida do servidor.')); }
+        } else {
+          try {
+            const j = JSON.parse(xhr.responseText);
+            reject(new Error(j.detail || j.erro || `Erro ${xhr.status}`));
+          } catch { reject(new Error(`Erro ${xhr.status}`)); }
+        }
+      };
+      xhr.onerror = () => reject(new Error('Falha de conexão ao enviar arquivo.'));
+      xhr.send(formData);
+    });
+  }
+
   return {
-    get:    (path)       => req('GET',    path),
-    post:   (path, body) => req('POST',   path, body),
-    put:    (path, body) => req('PUT',    path, body),
-    patch:  (path, body) => req('PATCH',  path, body),
-    delete: (path)       => req('DELETE', path),
-    upload: (path, form) => req('POST',   path, form, true),
+    get:       (path)       => req('GET',    path),
+    post:      (path, body) => req('POST',   path, body),
+    put:       (path, body) => req('PUT',    path, body),
+    patch:     (path, body) => req('PATCH',  path, body),
+    delete:    (path)       => req('DELETE', path),
+    uploadXHR,
   };
 })();
 
@@ -85,7 +113,6 @@ const Modal = (() => {
   function abrir(html) {
     conteudo().innerHTML = html;
     overlay().classList.remove('hidden');
-    // Foca o primeiro input/textarea/select para acessibilidade
     setTimeout(() => {
       const first = conteudo().querySelector('input, textarea, select, button');
       first?.focus();
@@ -97,12 +124,106 @@ const Modal = (() => {
     conteudo().innerHTML = '';
   }
 
-  // ESC fecha o modal
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !overlay().classList.contains('hidden')) fechar();
   });
 
   return { abrir, fechar };
+})();
+
+/* ============================================================
+   WS — gerencia conexões WebSocket de progresso por material
+   ============================================================ */
+const WS = (() => {
+  const _sockets = {};  // matId -> WebSocket
+  const _retries = {};  // matId -> retry count
+
+  function conectar(matId) {
+    if (_sockets[matId]) return;
+    _retries[matId] = 0;
+    _abrirConexao(matId);
+  }
+
+  function _abrirConexao(matId) {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${location.host}/ws/materiais/${matId}/progresso`);
+    _sockets[matId] = ws;
+
+    ws.onmessage = (evt) => {
+      try { _atualizar(matId, JSON.parse(evt.data)); } catch (_) {}
+    };
+
+    ws.onclose = () => {
+      delete _sockets[matId];
+      const retries = (_retries[matId] = (_retries[matId] || 0) + 1);
+      // Auto-reconecta até 6 tentativas com backoff exponencial
+      if (retries <= 6 && document.getElementById(`material-${matId}`)) {
+        const delay = Math.min(500 * 2 ** (retries - 1), 16000);
+        setTimeout(() => {
+          if (!_sockets[matId] && document.getElementById(`material-${matId}`)) {
+            _abrirConexao(matId);
+          }
+        }, delay);
+      }
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  function fechar(matId) {
+    _sockets[matId]?.close();
+    delete _sockets[matId];
+    delete _retries[matId];
+  }
+
+  function fecharTodos() {
+    Object.values(_sockets).forEach(ws => ws.close());
+    for (const k in _sockets) delete _sockets[k];
+    for (const k in _retries) delete _retries[k];
+  }
+
+  function _atualizar(matId, data) {
+    const { status, progresso_pct, mensagem } = data;
+    const item = document.getElementById(`material-${matId}`);
+    if (!item) return;
+
+    // Atualiza badge
+    const badgeEl = item.querySelector('.badge');
+    if (badgeEl) {
+      const clsMap = { PROCESSANDO: 'badge-processando', CONCLUIDO: 'badge-concluido', ERRO: 'badge-erro' };
+      const lblMap = { PROCESSANDO: 'Processando…', CONCLUIDO: 'Concluído', ERRO: 'Erro' };
+      badgeEl.className = `badge ${clsMap[status] || 'badge-pendente'}`;
+      badgeEl.textContent = lblMap[status] || status;
+    }
+
+    // Atualiza barra de progresso inline
+    const meta = item.querySelector('.material-meta');
+    let progDiv = item.querySelector('.progresso-material');
+
+    if (status === 'PROCESSANDO' && meta) {
+      if (!progDiv) {
+        progDiv = document.createElement('div');
+        progDiv.className = 'progresso-material';
+        meta.after(progDiv);
+      }
+      const pct = progresso_pct ?? 5;
+      progDiv.innerHTML = `
+        <div class="barra-progresso-container">
+          <div class="barra-progresso" style="width:${pct}%"></div>
+        </div>
+        <span class="progresso-msg">${_esc(mensagem || 'Processando…')} — ${pct}%</span>`;
+    } else {
+      progDiv?.remove();
+    }
+
+    // Ao concluir, fecha WS e recarrega a view
+    if (status === 'CONCLUIDO' || status === 'ERRO') {
+      fechar(matId);
+      setTimeout(() => window.dispatchEvent(new HashChangeEvent('hashchange')), 600);
+    }
+  }
+
+  return { conectar, fechar, fecharTodos };
 })();
 
 /* ============================================================
@@ -124,6 +245,23 @@ function _esc(str) {
 function _icone_tipo(tipo) {
   const map = { VIDEO: '🎬', AUDIO: '🎵', PDF: '📄', DOCUMENTO: '📝', TXT: '📃' };
   return map[tipo] || '📁';
+}
+
+function _icone_tipo_filename(filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  const map = {
+    mp4:'🎬', mkv:'🎬', avi:'🎬', mov:'🎬', webm:'🎬', m4v:'🎬',
+    mp3:'🎵', wav:'🎵', m4a:'🎵', ogg:'🎵', flac:'🎵', aac:'🎵',
+    pdf:'📄',
+    docx:'📝', pptx:'📝', xlsx:'📝', doc:'📝', ppt:'📝', xls:'📝',
+    odt:'📝', odp:'📝', ods:'📝',
+    txt:'📃', md:'📃',
+  };
+  return map[ext] || '📁';
+}
+
+function _label_tipo(tipo) {
+  return { VIDEO: 'Vídeo', AUDIO: 'Áudio', PDF: 'PDF', DOCUMENTO: 'Documento', TXT: 'Texto' }[tipo] || tipo;
 }
 
 function _badge_status(status) {
@@ -171,6 +309,7 @@ const App = (() => {
   }
 
   async function renderizar() {
+    WS.fecharTodos();  // Fecha WebSockets antes de renderizar nova view
     const { rota, params } = _parseHash();
     root().innerHTML = `
       <div class="loading-inicial">
@@ -260,7 +399,7 @@ const Views = (() => {
       </div>`;
   }
 
-  /* ── DISCIPLINA: detalhe com materiais e consolidados ── */
+  /* ── DISCIPLINA: materiais + consolidados ── */
   async function disciplina(id) {
     if (!id) { App.navegar('home'); return; }
     const disc = await API.get(`/disciplinas/${id}`);
@@ -274,7 +413,12 @@ const Views = (() => {
           <h1 class="secao-titulo">${_esc(disc.nome)}</h1>
           ${disc.codigo ? `<div style="font-size:.85rem;color:var(--cinza-400);font-family:var(--fonte-mono)">${_esc(disc.codigo)}</div>` : ''}
         </div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-secundario" onclick="App.navegar('home')">← Voltar</button>
+          <button class="btn btn-secundario"
+            onclick="novoConsolidado(${JSON.stringify(_esc(disc.id))})">
+            🗂 Consolidar Arquivos
+          </button>
           <button class="btn btn-secundario"
             onclick="editarDisciplina(${JSON.stringify(_esc(disc.id))})">
             ✏️ Editar
@@ -300,63 +444,120 @@ const Views = (() => {
         ${_renderConsolidados(disc.consolidados, disc.id)}
       </div>`;
 
-    // SSE para materiais em processamento
+    // Configura a zona de upload inline
+    _setupZonaUploadInline(disc.id);
+
+    // Conecta WS para materiais em processamento
     disc.materiais
-      .filter(m => m.status === 'PROCESSANDO')
-      .forEach(m => _iniciarSSE(m.id, disc.id));
+      .filter(m => m.status === 'PROCESSANDO' || m.status === 'PENDENTE')
+      .forEach(m => WS.conectar(m.id));
   }
 
   function _renderMateriais(materiais, discId) {
-    const addBtn = `
-      <button class="btn btn-primario" onclick="abrirUpload(${JSON.stringify(_esc(discId))})">
-        ⬆ Enviar Arquivo
-      </button>`;
+    const zonaUpload = `
+      <div class="zona-upload-inline" id="zona-drop-inline"
+        onclick="document.getElementById('file-input-inline').click()">
+        <span class="icone-upload-sm">📁</span>
+        <div class="texto-upload">
+          <strong>Arraste arquivos aqui</strong>
+          ou <span class="link-selecionar">clique para selecionar</span>
+          <span class="tipos-aceitos">Vídeo · Áudio · PDF · Documentos Office (.docx/.pptx/.xlsx) · TXT</span>
+        </div>
+        <input type="file" id="file-input-inline" multiple
+          accept=".mp4,.mkv,.avi,.mov,.webm,.m4v,.mp3,.wav,.m4a,.ogg,.flac,.aac,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.odt,.odp,.ods,.txt,.md" />
+      </div>
+      <div id="upload-progresso-outer" class="upload-progresso-outer" style="display:none">
+        <div class="barra-progresso-container">
+          <div class="barra-progresso" id="upload-barra-prog" style="width:0%"></div>
+        </div>
+        <span id="upload-msg-prog" class="progresso-msg">Enviando…</span>
+      </div>
+      <div id="upload-lista-inline" class="upload-lista" style="display:none"></div>`;
 
     if (materiais.length === 0) {
       return `
-        <div class="estado-vazio">
-          <div class="icone">📂</div>
-          <p>Nenhum material enviado ainda.</p>
-          ${addBtn}
+        <div style="padding:24px 0">
+          ${zonaUpload}
+          <div class="estado-vazio" style="padding:32px 0">
+            <div class="icone">📂</div>
+            <p>Nenhum material enviado ainda.</p>
+          </div>
         </div>`;
     }
 
-    const items = materiais.map(m => `
-      <div class="item-material" id="material-${m.id}">
+    const items = materiais.map(m => _renderItemMaterial(m, discId)).join('');
+    return `
+      <div>${zonaUpload}</div>
+      <div class="lista-materiais">${items}</div>`;
+  }
+
+  function _renderItemMaterial(m, discId) {
+    const processando = m.status === 'PROCESSANDO' || m.status === 'PENDENTE';
+    const erro = m.status === 'ERRO';
+    const concluido = m.status === 'CONCLUIDO';
+    const temTranscricao = concluido
+      && (m.tipo === 'VIDEO' || m.tipo === 'AUDIO')
+      && m.transcricao_caminho;
+
+    // Bloco de erro com toggle para detalhes técnicos
+    let erroBlock = '';
+    if (erro && m.erro_mensagem) {
+      const detId = `err-det-${_esc(m.id)}`;
+      erroBlock = `
+        <div class="erro-material">
+          <span class="erro-resumo">
+            ⚠ ${_esc(m.erro_mensagem)}
+            <button class="link-ver-log" onclick="toggleErroDetalhe('${detId}')">Ver log completo</button>
+          </span>
+          <pre id="${detId}" class="erro-detalhe">${_esc(m.erro_mensagem)}</pre>
+        </div>`;
+    }
+
+    // Barra de progresso inicial para materiais em processamento
+    const progressoBlock = processando ? `
+      <div class="progresso-material" id="progresso-${_esc(m.id)}">
+        <div class="barra-progresso-container">
+          <div class="barra-progresso" style="width:5%"></div>
+        </div>
+        <span class="progresso-msg">Aguardando início do processamento…</span>
+      </div>` : '';
+
+    return `
+      <div class="item-material" id="material-${_esc(m.id)}">
         <span class="material-icone">${_icone_tipo(m.tipo)}</span>
         <div class="material-info">
-          <div class="material-nome">${_esc(m.nome_original)}</div>
+          <div class="material-nome" title="${_esc(m.nome_original)}">${_esc(m.nome_original)}</div>
           <div class="material-meta">
             ${_badge_status(m.status)}
-            ${m.status === 'PROCESSANDO' ? `
-              <div class="barra-progresso-container">
-                <div class="barra-progresso" style="width:60%"></div>
-              </div>` : ''}
-            ${m.erro_mensagem ? `
-              <span style="color:var(--cor-erro);font-size:.75rem">⚠ ${_esc(m.erro_mensagem)}</span>` : ''}
+            <span class="material-tipo-label">${_esc(_label_tipo(m.tipo))}</span>
+            <span style="color:var(--cinza-300)">·</span>
+            <span style="font-size:.72rem;color:var(--cinza-400)">${_data_curta(m.criado_em)}</span>
           </div>
+          ${progressoBlock}
+          ${erroBlock}
         </div>
         <div class="material-acoes">
-          ${m.status === 'PENDENTE' && m.tipo !== 'TXT'
-            ? `<button class="btn btn-sm btn-primario"
-                onclick="transcrever(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(m.id))})">
-                ▶ Processar
-              </button>` : ''}
-          ${m.status === 'ERRO'
-            ? `<button class="btn btn-sm btn-secundario"
-                onclick="transcrever(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(m.id))})">
-                ↺ Tentar novamente
-              </button>` : ''}
+          <a class="btn btn-sm btn-secundario"
+            href="/api/v1/materiais/${_esc(m.id)}/download"
+            download="${_esc(m.nome_original)}"
+            title="Baixar arquivo original">⬇ Original</a>
+          ${temTranscricao ? `
+            <a class="btn btn-sm btn-secundario"
+              href="/api/v1/materiais/${_esc(m.id)}/transcricao/download"
+              download
+              title="Baixar transcrição TXT">📄 Transcrição</a>` : ''}
+          ${erro ? `
+            <button class="btn btn-sm btn-secundario"
+              onclick="reprocessarMaterial(${JSON.stringify(_esc(m.id))})">
+              ↺ Tentar novamente
+            </button>` : ''}
           <button class="btn btn-sm btn-perigo"
+            ${processando ? 'disabled title="Aguarde o processamento terminar"' : ''}
             onclick="excluirMaterial(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(m.id))},${JSON.stringify(_esc(m.nome_original))})">
             🗑
           </button>
         </div>
-      </div>`).join('');
-
-    return `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">${addBtn}</div>
-      <div class="lista-materiais">${items}</div>`;
+      </div>`;
   }
 
   function _renderConsolidados(consolidados, discId) {
@@ -479,7 +680,6 @@ async function salvarDisciplina() {
 
 /* ── Editar disciplina ── */
 async function editarDisciplina(id) {
-  // Busca o objeto atual — usa o cache da listagem ou faz uma requisição
   let disc;
   try {
     disc = await API.get(`/disciplinas/${id}`);
@@ -509,10 +709,9 @@ async function editarDisciplina(id) {
     </div>
   `);
 
-  // Preenche os campos de forma segura (via .value, nunca via innerHTML)
-  document.getElementById('edit-nome').value  = disc.nome    ?? '';
-  document.getElementById('edit-codigo').value = disc.codigo ?? '';
-  document.getElementById('edit-desc').value   = disc.descricao ?? '';
+  document.getElementById('edit-nome').value   = disc.nome       ?? '';
+  document.getElementById('edit-codigo').value = disc.codigo     ?? '';
+  document.getElementById('edit-desc').value   = disc.descricao  ?? '';
   document.getElementById('edit-nome').focus();
 }
 
@@ -533,12 +732,10 @@ async function salvarEdicaoDisciplina() {
   _setBtnLoading(btn, true);
 
   try {
-    // PUT para substituição completa, conforme REST
     await API.put(`/disciplinas/${disc.id}`, { nome, codigo, descricao: desc });
     Toast.sucesso('Disciplina atualizada com sucesso!');
     Modal.fechar();
     Estado.disciplinaEmEdicao = null;
-    // Reload da view atual (mantém a rota)
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   } catch (e) {
     Toast.erro(e.message);
@@ -595,108 +792,107 @@ async function confirmarExclusaoDisciplina(id, nome) {
 }
 
 /* ============================================================
-   Materiais
+   Materiais — upload, progresso, exclusão, reprocessamento
    ============================================================ */
 
-/* ── Upload de arquivo ── */
-function abrirUpload(discId) {
-  Modal.abrir(`
-    <h2 class="modal-titulo">Enviar Material</h2>
-    <div class="zona-upload" id="zona-drop" onclick="document.getElementById('file-input').click()">
-      <div class="icone-upload">📁</div>
-      <strong>Clique para selecionar</strong>
-      <p>ou arraste e solte aqui</p>
-      <p style="font-size:.78rem;margin-top:8px">Vídeo, Áudio, PDF, DOCX, PPTX, XLSX, TXT</p>
-      <input type="file" id="file-input"
-        accept=".mp4,.mkv,.avi,.mov,.webm,.m4v,.mp3,.wav,.m4a,.ogg,.flac,.aac,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.txt,.md" />
-    </div>
-    <div id="upload-status" style="margin-top:12px;display:none">
-      <div class="barra-progresso-container">
-        <div class="barra-progresso" id="upload-barra" style="width:0%"></div>
-      </div>
-      <p id="upload-msg" style="font-size:.85rem;margin-top:6px;color:var(--cinza-500)">Enviando…</p>
-    </div>
-    <div class="modal-acoes">
-      <button class="btn btn-secundario" onclick="Modal.fechar()">Fechar</button>
-    </div>
-  `);
+/**
+ * Configura os event listeners da zona de upload inline após render.
+ * Chamado por Views.disciplina após definir root().innerHTML.
+ */
+function _setupZonaUploadInline(discId) {
+  const zona  = document.getElementById('zona-drop-inline');
+  const input = document.getElementById('file-input-inline');
+  if (!zona || !input) return;
 
-  document.getElementById('file-input').addEventListener('change', e => {
-    enviarArquivo(discId, e.target.files);
+  input.addEventListener('change', e => _onFilesSelected(discId, e.target.files));
+
+  zona.addEventListener('dragover', e => {
+    e.preventDefault();
+    zona.classList.add('drag-over');
   });
-
-  const zona = document.getElementById('zona-drop');
-  zona.addEventListener('dragover',  e => { e.preventDefault(); zona.classList.add('drag-over'); });
-  zona.addEventListener('dragleave', ()  => zona.classList.remove('drag-over'));
+  zona.addEventListener('dragleave', () => zona.classList.remove('drag-over'));
   zona.addEventListener('drop', e => {
     e.preventDefault();
     zona.classList.remove('drag-over');
-    enviarArquivo(discId, e.dataTransfer.files);
+    _onFilesSelected(discId, e.dataTransfer.files);
   });
 }
 
-async function enviarArquivo(discId, files) {
+function _onFilesSelected(discId, files) {
   if (!files || files.length === 0) return;
-  const file = files[0];
+  const arr = Array.from(files);
 
-  const statusEl = document.getElementById('upload-status');
-  const barra    = document.getElementById('upload-barra');
-  const msg      = document.getElementById('upload-msg');
-
-  if (statusEl) {
-    statusEl.style.display = 'block';
-    barra.style.width = '30%';
-    barra.style.background = 'var(--cor-primaria)';
-    msg.textContent = `Enviando "${file.name}"…`;
+  // Exibe lista de arquivos selecionados
+  const listaEl = document.getElementById('upload-lista-inline');
+  if (listaEl) {
+    listaEl.style.display = 'flex';
+    listaEl.innerHTML = arr.map((f, i) => `
+      <div class="upload-arquivo-item" id="upload-arq-${i}">
+        <span>${_icone_tipo_filename(f.name)}</span>
+        <span class="upload-arquivo-nome" title="${_esc(f.name)}">${_esc(f.name)}</span>
+        <span class="upload-arquivo-status">⏳</span>
+      </div>`).join('');
   }
 
+  _enviarArquivos(discId, arr);
+}
+
+async function _enviarArquivos(discId, files) {
+  const progOuter = document.getElementById('upload-progresso-outer');
+  const barra     = document.getElementById('upload-barra-prog');
+  const msgEl     = document.getElementById('upload-msg-prog');
+  const zona      = document.getElementById('zona-drop-inline');
+
+  if (progOuter) progOuter.style.display = 'block';
+  if (zona)      zona.style.pointerEvents = 'none';
+
   const form = new FormData();
-  form.append('arquivo', file);
+  files.forEach(f => form.append('arquivos', f));
 
   try {
-    await API.upload(`/disciplinas/${discId}/materiais/upload`, form);
-    if (barra) barra.style.width = '100%';
-    if (msg)   msg.textContent = '✓ Enviado com sucesso!';
-    Toast.sucesso(`"${file.name}" enviado.`);
-    setTimeout(() => {
-      Modal.fechar();
-      window.dispatchEvent(new HashChangeEvent('hashchange'));
-    }, 800);
+    const materiais = await API.uploadXHR(
+      `/disciplinas/${discId}/materiais/upload`,
+      form,
+      (pct) => {
+        if (barra)  barra.style.width = `${pct}%`;
+        if (msgEl)  msgEl.textContent = `Enviando… ${pct}%`;
+      },
+    );
+
+    // Marca todos como enviados
+    files.forEach((_, i) => {
+      const el = document.querySelector(`#upload-arq-${i} .upload-arquivo-status`);
+      if (el) el.textContent = '✓';
+    });
+
+    if (barra) { barra.style.width = '100%'; barra.style.background = 'var(--cor-sucesso)'; }
+    if (msgEl) msgEl.textContent = `${materiais.length} arquivo(s) enviado(s) com sucesso!`;
+
+    Toast.sucesso(
+      materiais.length === 1
+        ? `"${files[0].name}" enviado. Processamento iniciado.`
+        : `${materiais.length} arquivos enviados. Processamento iniciado.`,
+    );
+
+    setTimeout(() => window.dispatchEvent(new HashChangeEvent('hashchange')), 900);
   } catch (e) {
     if (barra) { barra.style.width = '100%'; barra.style.background = 'var(--cor-erro)'; }
-    if (msg)   msg.textContent = `Erro: ${e.message}`;
+    if (msgEl) msgEl.textContent = `Erro: ${e.message}`;
+    if (zona)  zona.style.pointerEvents = '';
     Toast.erro(e.message);
   }
 }
 
-/* ── Transcrever/processar material ── */
-async function transcrever(discId, matId) {
+/* ── Reprocessar material com ERRO ── */
+async function reprocessarMaterial(matId) {
   try {
-    await API.post(`/disciplinas/${discId}/materiais/${matId}/transcrever`);
-    Toast.info('Processamento iniciado em background.');
-    _iniciarSSE(matId, discId);
+    await API.post(`/materiais/${matId}/reprocessar`);
+    Toast.info('Reprocessamento iniciado em background.');
+    WS.conectar(matId);
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   } catch (e) {
     Toast.erro(e.message);
   }
-}
-
-/* ── SSE: atualizações de progresso em tempo real ── */
-function _iniciarSSE(matId, discId) {
-  const url = `/api/v1/disciplinas/${discId}/materiais/${matId}/progresso`;
-  const es  = new EventSource(url);
-
-  es.onmessage = (evt) => {
-    let data;
-    try { data = JSON.parse(evt.data); } catch (_) { return; }
-
-    if (data.status === 'CONCLUIDO' || data.status === 'ERRO' || data.status === 'REMOVIDO') {
-      es.close();
-      setTimeout(() => window.dispatchEvent(new HashChangeEvent('hashchange')), 400);
-    }
-  };
-
-  es.onerror = () => es.close();
 }
 
 /* ── Excluir material ── */
@@ -717,7 +913,7 @@ function excluirMaterial(discId, matId, nome) {
 
 async function confirmarExclusaoMaterial(discId, matId) {
   try {
-    await API.delete(`/disciplinas/${discId}/materiais/${matId}`);
+    await API.delete(`/materiais/${matId}`);
     Toast.sucesso('Material excluído.');
     Modal.fechar();
     window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -830,13 +1026,17 @@ async function confirmarExclusaoConsolidado(discId, consId) {
    Helpers de UI
    ============================================================ */
 
+/** Expande/colapsa os detalhes técnicos de um erro de material */
+function toggleErroDetalhe(id) {
+  document.getElementById(id)?.classList.toggle('visivel');
+}
+
 /** Marca um campo com erro e exibe mensagem abaixo */
 function _marcarErro(inputId, mensagem) {
   const input = document.getElementById(inputId);
   if (!input) { Toast.aviso(mensagem); return; }
   input.style.borderColor = 'var(--cor-erro)';
   input.focus();
-  // Remove mensagem de erro anterior se existir
   input.parentElement.querySelector('.erro-campo')?.remove();
   const span = document.createElement('span');
   span.className = 'erro-campo';
