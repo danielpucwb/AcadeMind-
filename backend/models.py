@@ -153,6 +153,12 @@ class ConsolidadoArquivo(Base):
     # Relacionamentos
     disciplina: Mapped["Disciplina"] = relationship("Disciplina", back_populates="consolidados")
 
+    @property
+    def tamanho_bytes(self) -> int:
+        """Tamanho do arquivo consolidado em bytes (0 se não encontrado)."""
+        from backend.utils.storage import caminho_absoluto, tamanho_arquivo
+        return tamanho_arquivo(caminho_absoluto(self.caminho_arquivo))
+
 
 class AuditLog(Base):
     """Registro imutável de auditoria de operações do sistema."""

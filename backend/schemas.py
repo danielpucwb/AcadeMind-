@@ -103,6 +103,21 @@ class ConsolidadoCreate(BaseModel):
     materiais_ids: list[str] = Field(..., min_length=1)
 
 
+class ConsolidarTxtCreate(BaseModel):
+    nome: str = Field(..., min_length=1, max_length=512)
+    materiais_ids: list[str] = Field(..., min_length=1)
+
+
+class ConsolidarPdfCreate(BaseModel):
+    nome: str = Field(..., min_length=1, max_length=512)
+    materiais_ids: list[str] = Field(..., min_length=1)
+
+
+class FalhaConsolidacao(BaseModel):
+    material: str  # nome_original do material
+    erro: str
+
+
 class ConsolidadoOut(_BaseOut):
     id: str
     disciplina_id: str
@@ -111,6 +126,16 @@ class ConsolidadoOut(_BaseOut):
     caminho_arquivo: str
     materiais_ids: list[str]
     criado_em: datetime
+    tamanho_bytes: int  # lido via @property no modelo
+
+
+class ConsolidadoResultOut(BaseModel):
+    """Resposta enriquecida dos endpoints /consolidar/txt e /consolidar/pdf."""
+    consolidado: ConsolidadoOut
+    incluidos: list[str]             # nomes dos materiais incluídos com sucesso
+    falhas: list[FalhaConsolidacao]  # materiais que falharam e por quê
+    aviso: str | None = None         # mensagem de resumo quando há falhas
+    preview_txt: str | None = None   # primeiros 500 chars (TXT apenas)
 
 
 # ---------------------------------------------------------------------------

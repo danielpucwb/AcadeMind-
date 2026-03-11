@@ -19,7 +19,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from backend.database import init_db
-from backend.routers import consolidados, disciplinas
+from backend.routers import disciplinas
+from backend.routers.consolidados import router as consolidados_router
+from backend.routers.consolidados import router_flat as consolidados_flat_router
 from backend.routers.materiais import router_disc, router_mat
 from backend.utils.progresso import manager as progresso_manager
 
@@ -91,10 +93,11 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 API_PREFIX = "/api/v1"
 
-app.include_router(disciplinas.router, prefix=API_PREFIX)
-app.include_router(router_disc,        prefix=API_PREFIX)
-app.include_router(router_mat,         prefix=API_PREFIX)
-app.include_router(consolidados.router, prefix=API_PREFIX)
+app.include_router(disciplinas.router,      prefix=API_PREFIX)
+app.include_router(router_disc,             prefix=API_PREFIX)
+app.include_router(router_mat,             prefix=API_PREFIX)
+app.include_router(consolidados_router,    prefix=API_PREFIX)
+app.include_router(consolidados_flat_router, prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------------------

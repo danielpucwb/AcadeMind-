@@ -110,8 +110,10 @@ const Modal = (() => {
   const overlay  = () => document.getElementById('modal-overlay');
   const conteudo = () => document.getElementById('modal-conteudo');
 
-  function abrir(html) {
+  function abrir(html, xl = false) {
     conteudo().innerHTML = html;
+    const box = overlay().querySelector('.modal-box');
+    if (box) box.style.maxWidth = xl ? '700px' : '';
     overlay().classList.remove('hidden');
     setTimeout(() => {
       const first = conteudo().querySelector('input, textarea, select, button');
@@ -563,7 +565,7 @@ const Views = (() => {
   function _renderConsolidados(consolidados, discId) {
     const addBtn = `
       <button class="btn btn-primario" onclick="novoConsolidado(${JSON.stringify(_esc(discId))})">
-        + Gerar Consolidado
+        🗂 Gerar Consolidado
       </button>`;
 
     if (consolidados.length === 0) {
@@ -575,22 +577,34 @@ const Views = (() => {
         </div>`;
     }
 
-    const rows = consolidados.map(c => `
-      <div class="item-material">
-        <span class="material-icone">${c.tipo === 'PDF' ? '📄' : '📃'}</span>
-        <div class="material-info">
-          <div class="material-nome">${_esc(c.nome)}</div>
-          <div class="material-meta">
-            ${c.tipo} · ${c.materiais_ids.length} materiais · ${_data(c.criado_em)}
+    const rows = consolidados.map(c => {
+      const badgeCls = c.tipo === 'PDF' ? 'badge-tipo-pdf' : 'badge-tipo-txt';
+      const tam = _fmt_tamanho(c.tamanho_bytes);
+      return `
+        <div class="item-material">
+          <span class="material-icone">${c.tipo === 'PDF' ? '📑' : '📄'}</span>
+          <div class="material-info">
+            <div class="material-nome" title="${_esc(c.nome)}">${_esc(c.nome)}</div>
+            <div class="material-meta">
+              <span class="badge-tipo-cons ${badgeCls}">${c.tipo}</span>
+              <span class="material-tipo-label">${c.materiais_ids.length} material(is)</span>
+              <span style="color:var(--cinza-300)">·</span>
+              <span style="font-size:.72rem;color:var(--cinza-400)">${_data_curta(c.criado_em)}</span>
+              <span style="font-size:.72rem;color:var(--cinza-400);margin-left:4px">${tam}</span>
+            </div>
           </div>
-        </div>
-        <div class="material-acoes">
-          <button class="btn btn-sm btn-perigo"
-            onclick="excluirConsolidado(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(c.id))},${JSON.stringify(_esc(c.nome))})">
-            🗑
-          </button>
-        </div>
-      </div>`).join('');
+          <div class="material-acoes">
+            <a class="btn btn-sm btn-secundario"
+               href="/api/v1/consolidados/${_esc(c.id)}/download"
+               download="${_esc(c.nome)}"
+               title="Baixar arquivo consolidado">⬇ Baixar</a>
+            <button class="btn btn-sm btn-perigo"
+              onclick="excluirConsolidado(${JSON.stringify(_esc(c.id))},${JSON.stringify(_esc(c.nome))})">
+              🗑
+            </button>
+          </div>
+        </div>`;
+    }).join('');
 
     return `
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px">${addBtn}</div>
@@ -923,103 +937,353 @@ async function confirmarExclusaoMaterial(discId, matId) {
 }
 
 /* ============================================================
-   Consolidados
+   Consolidados — modal com abas TXT / PDF / Gerados
    ============================================================ */
 
-async function novoConsolidado(discId) {
-  const disc = await API.get(`/disciplinas/${discId}`);
-  const concluidos = disc.materiais.filter(m => m.status === 'CONCLUIDO');
+// Estado do modal de consolidação
+const EstadoCons = {
+  discId: null,
+  disc: null,
+};
 
-  if (concluidos.length === 0) {
-    Toast.aviso('Nenhum material com status Concluído disponível para consolidar.');
+async function novoConsolidado(discId) {
+  let disc;
+  try {
+    disc = await API.get(`/disciplinas/${discId}`);
+  } catch (e) {
+    Toast.erro('Não foi possível carregar os materiais.');
     return;
   }
 
+  EstadoCons.discId = discId;
+  EstadoCons.disc   = disc;
+
+  const txtElegiveis = disc.materiais.filter(m =>
+    m.status === 'CONCLUIDO' && (
+      m.tipo === 'TXT'
+      || ((m.tipo === 'VIDEO' || m.tipo === 'AUDIO') && m.transcricao_caminho)
+    )
+  );
+
+  const pdfElegiveis = disc.materiais.filter(m =>
+    m.status === 'CONCLUIDO' && (
+      m.tipo === 'PDF'
+      || (m.tipo === 'DOCUMENTO' && m.transcricao_caminho)
+    )
+  );
+
   Modal.abrir(`
-    <h2 class="modal-titulo">Gerar Consolidado</h2>
-    <div class="form-grupo">
-      <label for="cons-nome">Nome do arquivo <span style="color:var(--cor-erro)">*</span></label>
-      <input id="cons-nome" placeholder="Ex: Resumo Final Semestre" autocomplete="off" />
-    </div>
-    <div class="form-grupo">
-      <label for="cons-tipo">Tipo de saída</label>
-      <select id="cons-tipo">
-        <option value="TXT">TXT — transcrições e textos concatenados</option>
-        <option value="PDF">PDF — PDFs concatenados</option>
-      </select>
-    </div>
-    <div class="form-grupo">
-      <label>Materiais a incluir <span style="color:var(--cor-erro)">*</span></label>
-      <div class="lista-check">
-        ${concluidos.map(m => `
-          <label class="item-check">
-            <input type="checkbox" value="${_esc(m.id)}" />
-            <span class="item-check-label">${_icone_tipo(m.tipo)} ${_esc(m.nome_original)}</span>
-          </label>`).join('')}
+    <h2 class="modal-titulo" style="margin-bottom:12px">Consolidar Arquivos</h2>
+      <div class="modal-tabs" id="cons-tabs">
+        <button class="modal-tab-btn ativo" onclick="trocarTabCons('txt')">📄 Consolidar TXT</button>
+        <button class="modal-tab-btn"       onclick="trocarTabCons('pdf')">📑 Consolidar PDF</button>
+        <button class="modal-tab-btn"       onclick="trocarTabCons('gerados')">📋 Gerados (${disc.consolidados.length})</button>
       </div>
-    </div>
-    <div class="modal-acoes">
-      <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
-      <button class="btn btn-primario" onclick="gerarConsolidado(${JSON.stringify(discId)})">
-        Gerar
-      </button>
-    </div>
-  `);
-  document.getElementById('cons-nome')?.focus();
+
+      <div id="cons-painel-txt">
+        ${_renderPainelTxt(txtElegiveis, discId)}
+      </div>
+      <div id="cons-painel-pdf" style="display:none">
+        ${_renderPainelPdf(pdfElegiveis, discId)}
+      </div>
+      <div id="cons-painel-gerados" style="display:none">
+        ${_renderPainelGerados(disc.consolidados)}
+      </div>
+
+      <div class="modal-acoes" style="margin-top:8px">
+        <button class="btn btn-secundario" onclick="Modal.fechar()">Fechar</button>
+      </div>
+  `, true);  // true = modal XL
 }
 
-async function gerarConsolidado(discId) {
-  const nome = document.getElementById('cons-nome')?.value.trim();
-  const tipo = document.getElementById('cons-tipo')?.value;
-  const selecionados = [
-    ...document.querySelectorAll('.lista-check input:checked')
-  ].map(c => c.value);
+function trocarTabCons(tab) {
+  ['txt', 'pdf', 'gerados'].forEach((t, i) => {
+    document.getElementById(`cons-painel-${t}`).style.display = t === tab ? 'block' : 'none';
+    document.querySelectorAll('.modal-tab-btn')[i]?.classList.toggle('ativo', t === tab);
+  });
+}
 
-  if (!nome) { _marcarErro('cons-nome', 'Informe o nome do consolidado.'); return; }
-  if (selecionados.length === 0) { Toast.aviso('Selecione ao menos um material.'); return; }
+// ── Painel TXT ──────────────────────────────────────────────
+function _renderPainelTxt(elegiveis, discId) {
+  if (elegiveis.length === 0) {
+    return `<div class="estado-vazio" style="padding:24px 0">
+      <div class="icone" style="font-size:2rem">📄</div>
+      <p>Nenhum material com transcrição ou TXT disponível.</p>
+      <p style="font-size:.82rem;color:var(--cinza-400)">
+        Envie arquivos de vídeo, áudio ou TXT e aguarde o processamento.</p>
+    </div>`;
+  }
 
-  const btn = document.querySelector('.modal-acoes .btn-primario');
+  return `
+    <div class="lista-eleg" id="lista-eleg-txt">
+      ${elegiveis.map(m => `
+        <label class="eleg-item">
+          <input type="checkbox" value="${_esc(m.id)}" />
+          <div class="eleg-item-info">
+            <div class="eleg-item-nome">${_esc(m.nome_original)}</div>
+            <div class="eleg-item-meta">
+              <span class="eleg-origem ${_origemClasse(m)}">${_origemLabel(m)}</span>
+              ${_data_curta(m.criado_em)}
+            </div>
+          </div>
+        </label>`).join('')}
+    </div>
+    <div class="form-grupo">
+      <label for="cons-txt-nome">Nome do arquivo <span style="color:var(--cor-erro)">*</span></label>
+      <input id="cons-txt-nome" placeholder="Ex: Resumo Final Semestre" autocomplete="off" />
+    </div>
+    <div id="cons-txt-resultado"></div>
+    <button class="btn btn-primario" style="width:100%" id="btn-gerar-txt"
+      onclick="gerarConsolidadoTxt(${JSON.stringify(discId)})">
+      Gerar TXT Consolidado
+    </button>`;
+}
+
+async function gerarConsolidadoTxt(discId) {
+  const nome = document.getElementById('cons-txt-nome')?.value.trim();
+  if (!nome) { _marcarErro('cons-txt-nome', 'Informe o nome do arquivo.'); return; }
+
+  const ids = [...document.querySelectorAll('#lista-eleg-txt input:checked')].map(c => c.value);
+  if (ids.length === 0) { Toast.aviso('Selecione ao menos um material.'); return; }
+
+  const btn = document.getElementById('btn-gerar-txt');
   _setBtnLoading(btn, true);
 
   try {
-    await API.post(`/disciplinas/${discId}/consolidados`, {
-      disciplina_id: discId,
-      nome,
-      tipo,
-      materiais_ids: selecionados,
+    const res = await API.post(`/disciplinas/${discId}/consolidar/txt`, {
+      nome, materiais_ids: ids,
     });
-    Toast.sucesso('Consolidado gerado com sucesso!');
-    Modal.fechar();
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    _exibirResultadoCons('cons-txt-resultado', res);
+    Toast.sucesso('TXT consolidado gerado!');
+    _atualizarContagemGerados(discId);
   } catch (e) {
     Toast.erro(e.message);
+  } finally {
     _setBtnLoading(btn, false);
   }
 }
 
-function excluirConsolidado(discId, consId, nome) {
+// ── Painel PDF ──────────────────────────────────────────────
+function _renderPainelPdf(elegiveis, discId) {
+  if (elegiveis.length === 0) {
+    return `<div class="estado-vazio" style="padding:24px 0">
+      <div class="icone" style="font-size:2rem">📑</div>
+      <p>Nenhum material PDF ou documento convertido disponível.</p>
+      <p style="font-size:.82rem;color:var(--cinza-400)">
+        Envie arquivos PDF ou documentos Office e aguarde o processamento.</p>
+    </div>`;
+  }
+
+  return `
+    <div class="lista-eleg" id="lista-eleg-pdf">
+      ${elegiveis.map(m => `
+        <label class="eleg-item">
+          <input type="checkbox" value="${_esc(m.id)}" />
+          <div class="eleg-item-info">
+            <div class="eleg-item-nome">${_esc(m.nome_original)}</div>
+            <div class="eleg-item-meta">
+              <span class="eleg-origem ${_origemClasse(m)}">${_origemLabel(m)}</span>
+              ${_data_curta(m.criado_em)}
+            </div>
+          </div>
+        </label>`).join('')}
+    </div>
+    <p style="font-size:.78rem;color:var(--cinza-400);margin-bottom:12px">
+      ⏱ A geração do PDF pode demorar alguns segundos dependendo do tamanho dos arquivos.
+    </p>
+    <div class="form-grupo">
+      <label for="cons-pdf-nome">Nome do arquivo <span style="color:var(--cor-erro)">*</span></label>
+      <input id="cons-pdf-nome" placeholder="Ex: Material Completo Semestre" autocomplete="off" />
+    </div>
+    <div id="cons-pdf-resultado"></div>
+    <button class="btn btn-primario" style="width:100%" id="btn-gerar-pdf"
+      onclick="gerarConsolidadoPdf(${JSON.stringify(discId)})">
+      Gerar PDF Consolidado
+    </button>`;
+}
+
+async function gerarConsolidadoPdf(discId) {
+  const nome = document.getElementById('cons-pdf-nome')?.value.trim();
+  if (!nome) { _marcarErro('cons-pdf-nome', 'Informe o nome do arquivo.'); return; }
+
+  const ids = [...document.querySelectorAll('#lista-eleg-pdf input:checked')].map(c => c.value);
+  if (ids.length === 0) { Toast.aviso('Selecione ao menos um material.'); return; }
+
+  const btn = document.getElementById('btn-gerar-pdf');
+  _setBtnLoading(btn, true);
+
+  try {
+    const res = await API.post(`/disciplinas/${discId}/consolidar/pdf`, {
+      nome, materiais_ids: ids,
+    });
+    _exibirResultadoCons('cons-pdf-resultado', res);
+    Toast.sucesso('PDF consolidado gerado!');
+    _atualizarContagemGerados(discId);
+  } catch (e) {
+    Toast.erro(e.message);
+  } finally {
+    _setBtnLoading(btn, false);
+  }
+}
+
+// ── Painel Gerados ──────────────────────────────────────────
+function _renderPainelGerados(consolidados) {
+  if (consolidados.length === 0) {
+    return `<div class="estado-vazio" style="padding:24px 0">
+      <div class="icone" style="font-size:2rem">🗂</div>
+      <p>Nenhum arquivo consolidado gerado ainda.</p>
+    </div>`;
+  }
+
+  const linhas = consolidados.map(c => {
+    const tamanho = _fmt_tamanho(c.tamanho_bytes);
+    const badgeCls = c.tipo === 'PDF' ? 'badge-tipo-pdf' : 'badge-tipo-txt';
+    return `
+      <tr>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="${_esc(c.nome)}">${_esc(c.nome)}</td>
+        <td><span class="badge-tipo-cons ${badgeCls}">${c.tipo}</span></td>
+        <td style="white-space:nowrap">${_data_curta(c.criado_em)}</td>
+        <td style="white-space:nowrap">${tamanho}</td>
+        <td>
+          <div class="acoes-cell">
+            <a class="btn btn-sm btn-secundario"
+               href="/api/v1/consolidados/${_esc(c.id)}/download"
+               download="${_esc(c.nome)}"
+               title="Baixar arquivo">⬇</a>
+            <button class="btn btn-sm btn-perigo"
+              onclick="excluirConsolidado(${JSON.stringify(_esc(c.id))},${JSON.stringify(_esc(c.nome))})">
+              🗑
+            </button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div style="overflow-x:auto">
+      <table class="tabela-consolidados">
+        <thead>
+          <tr>
+            <th>Nome</th><th>Tipo</th><th>Gerado em</th><th>Tamanho</th><th></th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>`;
+}
+
+// ── Helpers da consolidação ─────────────────────────────────
+
+function _origemLabel(m) {
+  if (m.tipo === 'TXT') return 'TXT Original';
+  if (m.tipo === 'PDF') return 'PDF Original';
+  if (m.tipo === 'VIDEO' || m.tipo === 'AUDIO') return 'Transcrição gerada';
+  if (m.tipo === 'DOCUMENTO') return 'Documento convertido';
+  return '';
+}
+
+function _origemClasse(m) {
+  if (m.tipo === 'TXT' || m.tipo === 'PDF') return 'eleg-origem-original';
+  if (m.tipo === 'VIDEO' || m.tipo === 'AUDIO') return 'eleg-origem-transcricao';
+  return 'eleg-origem-convertido';
+}
+
+function _fmt_tamanho(bytes) {
+  if (!bytes && bytes !== 0) return '—';
+  if (bytes < 1024)       return `${bytes} B`;
+  if (bytes < 1024 ** 2)  return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3)  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function _exibirResultadoCons(containerId, res) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  let html = '';
+
+  // Aviso de falhas parciais
+  if (res.falhas && res.falhas.length > 0) {
+    const itens = res.falhas.map(f => `<li><strong>${_esc(f.material)}</strong>: ${_esc(f.erro)}</li>`).join('');
+    html += `
+      <div class="aviso-falhas">
+        <details>
+          <summary>⚠ ${res.falhas.length} arquivo(s) não incluído(s) — clique para detalhes</summary>
+          <ul>${itens}</ul>
+        </details>
+      </div>`;
+  }
+
+  // Preview TXT
+  if (res.preview_txt) {
+    html += `
+      <p style="font-size:.8rem;color:var(--cinza-500);margin-bottom:4px">
+        Prévia (primeiros 500 caracteres):
+      </p>
+      <pre class="preview-txt">${_esc(res.preview_txt)}</pre>`;
+  }
+
+  // Sucesso
+  if (res.incluidos && res.incluidos.length > 0) {
+    const tam = _fmt_tamanho(res.consolidado?.tamanho_bytes);
+    html += `
+      <div style="background:var(--cor-sucesso-bg);border:1px solid #bbf7d0;border-radius:var(--raio);padding:10px 14px;margin-top:10px;font-size:.82rem;color:var(--cor-sucesso)">
+        ✓ ${res.incluidos.length} arquivo(s) incluído(s) · ${tam}
+        <a class="btn btn-sm btn-secundario" style="margin-left:10px"
+           href="/api/v1/consolidados/${_esc(res.consolidado.id)}/download"
+           download="${_esc(res.consolidado.nome)}">⬇ Baixar</a>
+      </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+async function _atualizarContagemGerados(discId) {
+  try {
+    const consolidados = await API.get(`/disciplinas/${discId}/consolidados`);
+    // Atualiza a aba Gerados se estiver aberta
+    const painel = document.getElementById('cons-painel-gerados');
+    if (painel) painel.innerHTML = _renderPainelGerados(consolidados);
+    // Atualiza o contador na aba
+    const abas = document.querySelectorAll('.modal-tab-btn');
+    if (abas[2]) abas[2].textContent = `📋 Gerados (${consolidados.length})`;
+    // Atualiza o painel de consolidados na view principal
+    const painelPrincipal = document.getElementById('painel-consolidados');
+    if (painelPrincipal) {
+      const { Views } = window;
+      // Re-fetch the disc to get updated consolidados, but keep other elements intact
+    }
+  } catch (_) {}
+}
+
+function excluirConsolidado(consId, nome) {
   Modal.abrir(`
     <h2 class="modal-titulo">Excluir Consolidado</h2>
     <p>Remover <strong>${_esc(nome)}</strong>? O arquivo gerado será deletado.</p>
     <div class="modal-acoes">
-      <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
+      <button class="btn btn-secundario" onclick="abrirModalConsolidacao()">Cancelar</button>
       <button class="btn btn-perigo"
-        onclick="confirmarExclusaoConsolidado(${JSON.stringify(discId)},${JSON.stringify(consId)})">
+        onclick="confirmarExclusaoConsolidado(${JSON.stringify(consId)})">
         Excluir
       </button>
     </div>
   `);
 }
 
-async function confirmarExclusaoConsolidado(discId, consId) {
+async function confirmarExclusaoConsolidado(consId) {
   try {
-    await API.delete(`/disciplinas/${discId}/consolidados/${consId}`);
+    await API.delete(`/consolidados/${consId}`);
     Toast.sucesso('Consolidado excluído.');
     Modal.fechar();
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   } catch (e) {
     Toast.erro(e.message);
   }
+}
+
+function abrirModalConsolidacao() {
+  if (EstadoCons.discId) novoConsolidado(EstadoCons.discId);
 }
 
 /* ============================================================

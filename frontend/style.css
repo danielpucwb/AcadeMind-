@@ -709,3 +709,145 @@ table.tabela {
   color: var(--cinza-400);
   margin-left: 2px;
 }
+
+/* ── Modal XL para consolidação ── */
+.modal-xl { max-width: 700px; }
+
+/* ── Tabs dentro de modal (consolidação) ── */
+.modal-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 2px solid var(--cinza-200);
+  margin-bottom: 18px;
+  margin-top: -4px;
+}
+.modal-tab-btn {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .875rem;
+  font-weight: 500;
+  color: var(--cinza-500);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color var(--transicao), border-color var(--transicao);
+}
+.modal-tab-btn:hover { color: var(--cinza-700); }
+.modal-tab-btn.ativo { color: var(--cor-primaria); border-bottom-color: var(--cor-primaria); }
+
+/* ── Lista de materiais elegíveis para consolidação ── */
+.lista-eleg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--raio);
+  padding: 8px;
+  margin-bottom: 14px;
+}
+.eleg-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--transicao);
+}
+.eleg-item:hover { background: var(--cinza-50); }
+.eleg-item input[type=checkbox] { margin-top: 3px; flex-shrink: 0; accent-color: var(--cor-primaria); }
+.eleg-item-info { flex: 1; min-width: 0; }
+.eleg-item-nome {
+  font-size: .875rem;
+  font-weight: 500;
+  color: var(--cinza-800);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eleg-item-meta {
+  font-size: .72rem;
+  color: var(--cinza-400);
+  margin-top: 1px;
+}
+.eleg-origem {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: .68rem;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.eleg-origem-original  { background: var(--cinza-100);      color: var(--cinza-500); }
+.eleg-origem-transcricao { background: var(--cor-info-bg);  color: var(--cor-info); }
+.eleg-origem-convertido  { background: var(--cor-aviso-bg); color: var(--cor-aviso); }
+
+/* ── Aviso de falhas parciais ── */
+.aviso-falhas {
+  background: var(--cor-aviso-bg);
+  border: 1px solid #fde68a;
+  border-radius: var(--raio);
+  padding: 10px 14px;
+  font-size: .82rem;
+  color: var(--cor-aviso);
+  margin-bottom: 12px;
+}
+.aviso-falhas details summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.aviso-falhas ul { margin: 6px 0 0 16px; }
+.aviso-falhas li { margin-bottom: 2px; }
+
+/* ── Preview de TXT gerado ── */
+.preview-txt {
+  background: var(--cinza-50);
+  border: 1px solid var(--cinza-200);
+  border-radius: var(--raio);
+  padding: 12px;
+  font-family: var(--fonte-mono);
+  font-size: .75rem;
+  color: var(--cinza-700);
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 10px;
+}
+
+/* ── Tabela de consolidados gerados ── */
+.tabela-consolidados { width: 100%; border-collapse: collapse; font-size: .83rem; }
+.tabela-consolidados th {
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--cinza-50);
+  border-bottom: 2px solid var(--cinza-200);
+  font-weight: 600;
+  color: var(--cinza-600);
+  white-space: nowrap;
+}
+.tabela-consolidados td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--cinza-100);
+  color: var(--cinza-700);
+  vertical-align: middle;
+}
+.tabela-consolidados tr:hover td { background: var(--cinza-50); }
+.tabela-consolidados .acoes-cell {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.badge-tipo-cons {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.badge-tipo-txt { background: var(--cor-info-bg); color: var(--cor-info); }
+.badge-tipo-pdf { background: var(--cor-erro-bg); color: var(--cor-erro); }
