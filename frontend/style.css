@@ -4,9 +4,9 @@
 
 /* ── Variáveis de design ── */
 :root {
-  --cor-primaria: #2563eb;       /* Azul forte */
-  --cor-primaria-hover: #1d4ed8;
-  --cor-primaria-claro: #eff6ff;
+  --cor-primaria: #4A6CF7;       /* Azul AcadeMind */
+  --cor-primaria-hover: #3a5ce6;
+  --cor-primaria-claro: #eef1fe;
   --cor-sucesso: #16a34a;
   --cor-sucesso-bg: #f0fdf4;
   --cor-erro: #dc2626;
@@ -45,7 +45,7 @@ html { font-size: 16px; scroll-behavior: smooth; }
 
 body {
   font-family: var(--fonte-base);
-  background: var(--cinza-50);
+  background: #F8F9FA;
   color: var(--cinza-800);
   line-height: 1.6;
   min-height: 100vh;
@@ -141,11 +141,17 @@ body {
 .btn-secundario:hover:not(:disabled) { background: var(--cinza-200); }
 
 .btn-perigo {
+  background: var(--cinza-100);
+  color: var(--cinza-500);
+  border: 1px solid var(--cinza-200);
+  transition: background var(--transicao), color var(--transicao), border-color var(--transicao);
+}
+.btn-perigo:hover:not(:disabled),
+.btn-perigo:focus-visible:not(:disabled) {
   background: var(--cor-erro-bg);
   color: var(--cor-erro);
-  border: 1px solid #fecaca;
+  border-color: #fecaca;
 }
-.btn-perigo:hover:not(:disabled) { background: #fecaca; }
 
 .btn-sm { padding: 5px 12px; font-size: .82rem; }
 
@@ -181,13 +187,18 @@ body {
   border: 1px solid var(--cinza-200);
   border-radius: var(--raio-lg);
   padding: 20px;
-  cursor: pointer;
   transition: box-shadow var(--transicao), border-color var(--transicao);
   box-shadow: var(--sombra);
+  display: flex;
+  flex-direction: column;
 }
 .card-disciplina:hover {
   box-shadow: var(--sombra-md);
   border-color: var(--cor-primaria);
+}
+.card-disciplina-corpo {
+  flex: 1;
+  cursor: pointer;
 }
 .card-disciplina .nome {
   font-size: 1rem;
@@ -209,10 +220,22 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.card-disciplina .data-criacao {
+  font-size: .75rem;
+  color: var(--cinza-400);
+  margin-top: 10px;
+}
 .card-disciplina .rodape {
   margin-top: 12px;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border-top: 1px solid var(--cinza-100);
+  padding-top: 12px;
+}
+.card-disciplina .rodape-acoes {
+  display: flex;
   gap: 6px;
 }
 
@@ -457,6 +480,7 @@ body {
 }
 .estado-vazio .icone { font-size: 3rem; margin-bottom: 12px; }
 .estado-vazio p { font-size: .95rem; }
+.estado-vazio .btn { margin-top: 16px; }
 
 /* ── Tabs ── */
 .tabs {

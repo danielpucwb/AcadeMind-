@@ -1,15 +1,15 @@
 /**
  * app.js — SPA AcadeMind
  *
- * Roteamento simples via hash (#home, #disciplina/:id, #logs).
+ * Roteamento via hash: #home | #disciplina?id=... | #logs
  * Sem dependências externas — vanilla JS puro.
  *
  * Módulos:
- *   API      — wrapper para chamadas à API REST
+ *   API      — wrapper fetch para a API REST
  *   Toast    — notificações de feedback
- *   Modal    — diálogo genérico
+ *   Modal    — diálogo genérico com suporte a ESC
  *   App      — roteador e controlador de views
- *   Views    — funções que renderizam cada "página"
+ *   Views    — renderiza cada "página"
  */
 
 'use strict';
@@ -26,7 +26,7 @@ const API = (() => {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     } else if (body instanceof FormData) {
-      opts.body = body; // fetch define Content-Type multipart automaticamente
+      opts.body = body;
     }
     const res = await fetch(BASE + path, opts);
     if (!res.ok) {
@@ -34,17 +34,17 @@ const API = (() => {
       try { const j = await res.json(); msg = j.detail || j.erro || msg; } catch (_) {}
       throw new Error(msg);
     }
-    // 204 No Content
     if (res.status === 204) return null;
     return res.json();
   }
 
   return {
-    get:    (path)          => req('GET', path),
-    post:   (path, body)    => req('POST', path, body),
-    patch:  (path, body)    => req('PATCH', path, body),
-    delete: (path)          => req('DELETE', path),
-    upload: (path, form)    => req('POST', path, form, true),
+    get:    (path)       => req('GET',    path),
+    post:   (path, body) => req('POST',   path, body),
+    put:    (path, body) => req('PUT',    path, body),
+    patch:  (path, body) => req('PATCH',  path, body),
+    delete: (path)       => req('DELETE', path),
+    upload: (path, form) => req('POST',   path, form, true),
   };
 })();
 
@@ -76,7 +76,7 @@ const Toast = (() => {
 })();
 
 /* ============================================================
-   Modal — diálogo genérico
+   Modal — diálogo genérico (fecha com ESC, click no overlay, botão ×)
    ============================================================ */
 const Modal = (() => {
   const overlay  = () => document.getElementById('modal-overlay');
@@ -85,6 +85,11 @@ const Modal = (() => {
   function abrir(html) {
     conteudo().innerHTML = html;
     overlay().classList.remove('hidden');
+    // Foca o primeiro input/textarea/select para acessibilidade
+    setTimeout(() => {
+      const first = conteudo().querySelector('input, textarea, select, button');
+      first?.focus();
+    }, 60);
   }
 
   function fechar() {
@@ -92,16 +97,28 @@ const Modal = (() => {
     conteudo().innerHTML = '';
   }
 
+  // ESC fecha o modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !overlay().classList.contains('hidden')) fechar();
+  });
+
   return { abrir, fechar };
 })();
+
+/* ============================================================
+   Estado global — evita passar dados via atributos inline (XSS-safe)
+   ============================================================ */
+const Estado = {
+  disciplinaEmEdicao: null,  // objeto Disciplina completo durante edição
+};
 
 /* ============================================================
    Utilitários
    ============================================================ */
 function _esc(str) {
-  return String(str)
+  return String(str ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function _icone_tipo(tipo) {
@@ -111,13 +128,23 @@ function _icone_tipo(tipo) {
 
 function _badge_status(status) {
   const cls = {
-    PENDENTE: 'badge-pendente',
+    PENDENTE:    'badge-pendente',
     PROCESSANDO: 'badge-processando',
-    CONCLUIDO: 'badge-concluido',
-    ERRO: 'badge-erro',
+    CONCLUIDO:   'badge-concluido',
+    ERRO:        'badge-erro',
   }[status] || 'badge-pendente';
-  const label = { PENDENTE: 'Pendente', PROCESSANDO: 'Processando…', CONCLUIDO: 'Concluído', ERRO: 'Erro' }[status] || status;
+  const label = {
+    PENDENTE:    'Pendente',
+    PROCESSANDO: 'Processando…',
+    CONCLUIDO:   'Concluído',
+    ERRO:        'Erro',
+  }[status] || status;
   return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function _data_curta(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function _data(iso) {
@@ -145,16 +172,25 @@ const App = (() => {
 
   async function renderizar() {
     const { rota, params } = _parseHash();
-    root().innerHTML = '<div class="loading-inicial"><div class="spinner"></div><p>Carregando…</p></div>';
+    root().innerHTML = `
+      <div class="loading-inicial">
+        <div class="spinner"></div>
+        <p>Carregando…</p>
+      </div>`;
     try {
       switch (rota) {
-        case 'home':         await Views.home();                              break;
-        case 'disciplina':   await Views.disciplina(params.id);              break;
-        case 'logs':         await Views.logs();                              break;
-        default:             await Views.home();
+        case 'home':       await Views.home();                  break;
+        case 'disciplina': await Views.disciplina(params.id);  break;
+        case 'logs':       await Views.logs();                  break;
+        default:           await Views.home();
       }
     } catch (err) {
-      root().innerHTML = `<div class="estado-vazio"><div class="icone">⚠️</div><p>${_esc(err.message)}</p></div>`;
+      root().innerHTML = `
+        <div class="estado-vazio">
+          <div class="icone">⚠️</div>
+          <p>${_esc(err.message)}</p>
+          <button class="btn btn-secundario" onclick="App.navegar('home')">← Voltar ao início</button>
+        </div>`;
     }
   }
 
@@ -174,27 +210,18 @@ const Views = (() => {
   async function home() {
     const disciplinas = await API.get('/disciplinas/');
 
-    let cardsHTML = '';
+    let conteudo = '';
     if (disciplinas.length === 0) {
-      cardsHTML = `<div class="estado-vazio">
-        <div class="icone">📚</div>
-        <p>Nenhuma disciplina cadastrada ainda.</p>
-        <p>Clique em <strong>Nova Disciplina</strong> para começar.</p>
-      </div>`;
+      conteudo = `
+        <div class="estado-vazio">
+          <div class="icone">📚</div>
+          <p><strong>Nenhuma disciplina cadastrada.</strong></p>
+          <p>Comece criando uma para organizar seus materiais.</p>
+          <button class="btn btn-primario" onclick="novaDisciplina()">+ Nova Disciplina</button>
+        </div>`;
     } else {
-      cardsHTML = `<div class="grid-disciplinas">` +
-        disciplinas.map(d => `
-          <div class="card-disciplina" onclick="App.navegar('disciplina', {id:'${_esc(d.id)}'})">
-            <div class="nome">${_esc(d.nome)}</div>
-            ${d.codigo ? `<div class="codigo">${_esc(d.codigo)}</div>` : ''}
-            ${d.descricao ? `<div class="descricao">${_esc(d.descricao)}</div>` : ''}
-            <div class="rodape">
-              <button class="btn btn-sm btn-secundario" onclick="event.stopPropagation(); editarDisciplina('${d.id}', '${_esc(d.nome)}', '${_esc(d.codigo||'')}', '${_esc(d.descricao||'')}')">✏️ Editar</button>
-              <button class="btn btn-sm btn-perigo" onclick="event.stopPropagation(); excluirDisciplina('${d.id}', '${_esc(d.nome)}')">🗑</button>
-            </div>
-          </div>
-        `).join('') +
-      `</div>`;
+      const cards = disciplinas.map(d => _cardDisciplina(d)).join('');
+      conteudo = `<div class="grid-disciplinas">${cards}</div>`;
     }
 
     root().innerHTML = `
@@ -202,8 +229,35 @@ const Views = (() => {
         <h1 class="secao-titulo">Disciplinas</h1>
         <button class="btn btn-primario" onclick="novaDisciplina()">+ Nova Disciplina</button>
       </div>
-      ${cardsHTML}
-    `;
+      ${conteudo}`;
+  }
+
+  function _cardDisciplina(d) {
+    return `
+      <div class="card-disciplina" role="article" aria-label="${_esc(d.nome)}">
+        <div class="card-disciplina-corpo" onclick="App.navegar('disciplina', {id:'${_esc(d.id)}'})">
+          <div class="nome">${_esc(d.nome)}</div>
+          ${d.codigo ? `<div class="codigo">${_esc(d.codigo)}</div>` : ''}
+          ${d.descricao ? `<div class="descricao">${_esc(d.descricao)}</div>` : ''}
+          <div class="data-criacao">Criada em ${_data_curta(d.criado_em)}</div>
+        </div>
+        <div class="rodape">
+          <button class="btn btn-sm btn-primario"
+            onclick="App.navegar('disciplina', {id:'${_esc(d.id)}'})">
+            Abrir →
+          </button>
+          <div class="rodape-acoes">
+            <button class="btn btn-sm btn-secundario"
+              onclick="event.stopPropagation(); editarDisciplina(${JSON.stringify(_esc(d.id))})">
+              ✏️ Editar
+            </button>
+            <button class="btn btn-sm btn-perigo"
+              onclick="event.stopPropagation(); excluirDisciplina(${JSON.stringify(_esc(d.id))}, ${JSON.stringify(_esc(d.nome))})">
+              🗑
+            </button>
+          </div>
+        </div>
+      </div>`;
   }
 
   /* ── DISCIPLINA: detalhe com materiais e consolidados ── */
@@ -213,40 +267,58 @@ const Views = (() => {
 
     root().innerHTML = `
       <div class="breadcrumb">
-        <span onclick="App.navegar('home')">Disciplinas</span> › ${_esc(disc.nome)}
+        <span onclick="App.navegar('home')">Disciplinas</span> › <strong>${_esc(disc.nome)}</strong>
       </div>
       <div class="secao-header">
-        <h1 class="secao-titulo">${_esc(disc.nome)}</h1>
+        <div>
+          <h1 class="secao-titulo">${_esc(disc.nome)}</h1>
+          ${disc.codigo ? `<div style="font-size:.85rem;color:var(--cinza-400);font-family:var(--fonte-mono)">${_esc(disc.codigo)}</div>` : ''}
+        </div>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-secundario" onclick="editarDisciplina('${disc.id}','${_esc(disc.nome)}','${_esc(disc.codigo||'')}','${_esc(disc.descricao||'')}')">✏️ Editar</button>
-          <button class="btn btn-perigo" onclick="excluirDisciplina('${disc.id}','${_esc(disc.nome)}')">🗑 Excluir</button>
+          <button class="btn btn-secundario"
+            onclick="editarDisciplina(${JSON.stringify(_esc(disc.id))})">
+            ✏️ Editar
+          </button>
+          <button class="btn btn-perigo"
+            onclick="excluirDisciplina(${JSON.stringify(_esc(disc.id))}, ${JSON.stringify(_esc(disc.nome))})">
+            🗑 Excluir
+          </button>
         </div>
       </div>
 
       <div class="tabs">
-        <button class="tab-btn ativo" id="tab-materiais" onclick="trocarTab('materiais')">📁 Materiais (${disc.materiais.length})</button>
-        <button class="tab-btn" id="tab-consolidados" onclick="trocarTab('consolidados')">🗂 Consolidados (${disc.consolidados.length})</button>
+        <button class="tab-btn ativo" id="tab-materiais" onclick="trocarTab('materiais')">
+          📁 Materiais (${disc.materiais.length})
+        </button>
+        <button class="tab-btn" id="tab-consolidados" onclick="trocarTab('consolidados')">
+          🗂 Consolidados (${disc.consolidados.length})
+        </button>
       </div>
 
-      <div id="painel-materiais">${renderMateriais(disc.materiais, disc.id)}</div>
-      <div id="painel-consolidados" style="display:none">${renderConsolidados(disc.consolidados, disc.id, disc.materiais)}</div>
-    `;
+      <div id="painel-materiais">${_renderMateriais(disc.materiais, disc.id)}</div>
+      <div id="painel-consolidados" style="display:none">
+        ${_renderConsolidados(disc.consolidados, disc.id)}
+      </div>`;
 
-    // Inicia polling de progresso para materiais em processamento
+    // SSE para materiais em processamento
     disc.materiais
       .filter(m => m.status === 'PROCESSANDO')
-      .forEach(m => iniciarSSE(m.id, disc.id));
+      .forEach(m => _iniciarSSE(m.id, disc.id));
   }
 
-  function renderMateriais(materiais, discId) {
-    const addBtn = `<button class="btn btn-primario" onclick="abrirUpload('${discId}')">⬆ Enviar Arquivo</button>`;
+  function _renderMateriais(materiais, discId) {
+    const addBtn = `
+      <button class="btn btn-primario" onclick="abrirUpload(${JSON.stringify(_esc(discId))})">
+        ⬆ Enviar Arquivo
+      </button>`;
 
     if (materiais.length === 0) {
-      return `<div class="estado-vazio">
-        <div class="icone">📂</div>
-        <p>Nenhum material enviado.</p>
-        ${addBtn}
-      </div>`;
+      return `
+        <div class="estado-vazio">
+          <div class="icone">📂</div>
+          <p>Nenhum material enviado ainda.</p>
+          ${addBtn}
+        </div>`;
     }
 
     const items = materiais.map(m => `
@@ -256,33 +328,50 @@ const Views = (() => {
           <div class="material-nome">${_esc(m.nome_original)}</div>
           <div class="material-meta">
             ${_badge_status(m.status)}
-            ${m.status === 'PROCESSANDO' ? '<div class="barra-progresso-container"><div class="barra-progresso" style="width:60%"></div></div>' : ''}
-            ${m.erro_mensagem ? `<span style="color:var(--cor-erro);font-size:.75rem">⚠ ${_esc(m.erro_mensagem)}</span>` : ''}
+            ${m.status === 'PROCESSANDO' ? `
+              <div class="barra-progresso-container">
+                <div class="barra-progresso" style="width:60%"></div>
+              </div>` : ''}
+            ${m.erro_mensagem ? `
+              <span style="color:var(--cor-erro);font-size:.75rem">⚠ ${_esc(m.erro_mensagem)}</span>` : ''}
           </div>
         </div>
         <div class="material-acoes">
-          ${m.status === 'PENDENTE' && m.tipo !== 'TXT' ? `<button class="btn btn-sm btn-primario" onclick="transcrever('${discId}','${m.id}')">▶ Processar</button>` : ''}
-          ${m.status === 'ERRO' ? `<button class="btn btn-sm btn-aviso" onclick="transcrever('${discId}','${m.id}')">↺ Tentar novamente</button>` : ''}
-          <button class="btn btn-sm btn-perigo" onclick="excluirMaterial('${discId}','${m.id}','${_esc(m.nome_original)}')">🗑</button>
+          ${m.status === 'PENDENTE' && m.tipo !== 'TXT'
+            ? `<button class="btn btn-sm btn-primario"
+                onclick="transcrever(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(m.id))})">
+                ▶ Processar
+              </button>` : ''}
+          ${m.status === 'ERRO'
+            ? `<button class="btn btn-sm btn-secundario"
+                onclick="transcrever(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(m.id))})">
+                ↺ Tentar novamente
+              </button>` : ''}
+          <button class="btn btn-sm btn-perigo"
+            onclick="excluirMaterial(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(m.id))},${JSON.stringify(_esc(m.nome_original))})">
+            🗑
+          </button>
         </div>
-      </div>
-    `).join('');
+      </div>`).join('');
 
     return `
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px">${addBtn}</div>
-      <div class="lista-materiais">${items}</div>
-    `;
+      <div class="lista-materiais">${items}</div>`;
   }
 
-  function renderConsolidados(consolidados, discId, materiais) {
-    const addBtn = `<button class="btn btn-primario" onclick="novoConsolidado('${discId}')">+ Gerar Consolidado</button>`;
+  function _renderConsolidados(consolidados, discId) {
+    const addBtn = `
+      <button class="btn btn-primario" onclick="novoConsolidado(${JSON.stringify(_esc(discId))})">
+        + Gerar Consolidado
+      </button>`;
 
     if (consolidados.length === 0) {
-      return `<div class="estado-vazio">
-        <div class="icone">🗂</div>
-        <p>Nenhum arquivo consolidado gerado.</p>
-        ${addBtn}
-      </div>`;
+      return `
+        <div class="estado-vazio">
+          <div class="icone">🗂</div>
+          <p>Nenhum arquivo consolidado gerado.</p>
+          ${addBtn}
+        </div>`;
     }
 
     const rows = consolidados.map(c => `
@@ -290,44 +379,43 @@ const Views = (() => {
         <span class="material-icone">${c.tipo === 'PDF' ? '📄' : '📃'}</span>
         <div class="material-info">
           <div class="material-nome">${_esc(c.nome)}</div>
-          <div class="material-meta">${c.tipo} · ${c.materiais_ids.length} materiais · ${_data(c.criado_em)}</div>
+          <div class="material-meta">
+            ${c.tipo} · ${c.materiais_ids.length} materiais · ${_data(c.criado_em)}
+          </div>
         </div>
         <div class="material-acoes">
-          <button class="btn btn-sm btn-perigo" onclick="excluirConsolidado('${discId}','${c.id}','${_esc(c.nome)}')">🗑</button>
+          <button class="btn btn-sm btn-perigo"
+            onclick="excluirConsolidado(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(c.id))},${JSON.stringify(_esc(c.nome))})">
+            🗑
+          </button>
         </div>
-      </div>
-    `).join('');
+      </div>`).join('');
 
     return `
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px">${addBtn}</div>
-      <div class="lista-materiais">${rows}</div>
-    `;
+      <div class="lista-materiais">${rows}</div>`;
   }
 
-  /* ── LOGS: tabela de auditoria ── */
+  /* ── LOGS: auditoria ── */
   async function logs() {
-    // Não há endpoint de listagem de logs na API v1 por padrão,
-    // mas o arquivo audit.log pode ser exibido via leitura futura.
-    // Por ora, mostra mensagem informativa.
     root().innerHTML = `
       <div class="secao-header">
         <h1 class="secao-titulo">Log de Auditoria</h1>
       </div>
       <div class="card">
-        <p style="color:var(--cinza-500)">Os logs de auditoria são gravados em <code>logs/audit.log</code> na raiz do projeto.<br>
-        Um endpoint de consulta será adicionado em versão futura.</p>
-      </div>
-    `;
+        <p style="color:var(--cinza-500)">
+          Os logs de auditoria são gravados em <code>logs/audit.log</code> na raiz do projeto.<br>
+          Um endpoint de consulta será adicionado em versão futura.
+        </p>
+      </div>`;
   }
 
   return { home, disciplina, logs };
 })();
 
 /* ============================================================
-   Ações globais (chamadas pelos onclick inline)
+   Tabs (acessível via onclick inline)
    ============================================================ */
-
-/* ── Tabs ── */
 function trocarTab(tab) {
   ['materiais', 'consolidados'].forEach(t => {
     document.getElementById(`painel-${t}`).style.display = t === tab ? 'block' : 'none';
@@ -335,85 +423,182 @@ function trocarTab(tab) {
   });
 }
 
+/* ============================================================
+   Disciplinas — CRUD
+   ============================================================ */
+
 /* ── Nova disciplina ── */
 function novaDisciplina() {
+  Estado.disciplinaEmEdicao = null;
   Modal.abrir(`
     <h2 class="modal-titulo">Nova Disciplina</h2>
-    <div class="form-grupo"><label>Nome *</label><input id="disc-nome" placeholder="Ex: Metodologia da Pesquisa" /></div>
-    <div class="form-grupo"><label>Código</label><input id="disc-codigo" placeholder="Ex: MET501" /></div>
-    <div class="form-grupo"><label>Descrição</label><textarea id="disc-desc" placeholder="Opcional"></textarea></div>
+    <div class="form-grupo">
+      <label for="disc-nome">Nome <span style="color:var(--cor-erro)">*</span></label>
+      <input id="disc-nome" placeholder="Ex: Metodologia da Pesquisa" autocomplete="off" />
+    </div>
+    <div class="form-grupo">
+      <label for="disc-codigo">Código</label>
+      <input id="disc-codigo" placeholder="Ex: MET501" autocomplete="off" />
+    </div>
+    <div class="form-grupo">
+      <label for="disc-desc">Descrição</label>
+      <textarea id="disc-desc" placeholder="Opcional — breve resumo da disciplina"></textarea>
+    </div>
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
-      <button class="btn btn-primario" onclick="salvarDisciplina()">Salvar</button>
+      <button class="btn btn-primario" onclick="salvarDisciplina()">Criar Disciplina</button>
     </div>
   `);
-  setTimeout(() => document.getElementById('disc-nome')?.focus(), 50);
+  document.getElementById('disc-nome')?.focus();
 }
 
 async function salvarDisciplina() {
   const nome   = document.getElementById('disc-nome')?.value.trim();
   const codigo = document.getElementById('disc-codigo')?.value.trim() || null;
   const desc   = document.getElementById('disc-desc')?.value.trim() || null;
-  if (!nome) { Toast.aviso('Informe o nome da disciplina.'); return; }
+
+  if (!nome) {
+    _marcarErro('disc-nome', 'O nome é obrigatório.');
+    return;
+  }
+
+  const btn = document.querySelector('.modal-acoes .btn-primario');
+  _setBtnLoading(btn, true);
+
   try {
     await API.post('/disciplinas/', { nome, codigo, descricao: desc });
     Toast.sucesso('Disciplina criada com sucesso!');
     Modal.fechar();
     App.navegar('home');
-  } catch (e) { Toast.erro(e.message); }
+  } catch (e) {
+    Toast.erro(e.message);
+  } finally {
+    _setBtnLoading(btn, false);
+  }
 }
 
 /* ── Editar disciplina ── */
-function editarDisciplina(id, nome, codigo, desc) {
+async function editarDisciplina(id) {
+  // Busca o objeto atual — usa o cache da listagem ou faz uma requisição
+  let disc;
+  try {
+    disc = await API.get(`/disciplinas/${id}`);
+  } catch (e) {
+    Toast.erro('Não foi possível carregar a disciplina.');
+    return;
+  }
+  Estado.disciplinaEmEdicao = disc;
+
   Modal.abrir(`
     <h2 class="modal-titulo">Editar Disciplina</h2>
-    <div class="form-grupo"><label>Nome *</label><input id="edit-nome" value="${_esc(nome)}" /></div>
-    <div class="form-grupo"><label>Código</label><input id="edit-codigo" value="${_esc(codigo)}" /></div>
-    <div class="form-grupo"><label>Descrição</label><textarea id="edit-desc">${_esc(desc)}</textarea></div>
+    <div class="form-grupo">
+      <label for="edit-nome">Nome <span style="color:var(--cor-erro)">*</span></label>
+      <input id="edit-nome" autocomplete="off" />
+    </div>
+    <div class="form-grupo">
+      <label for="edit-codigo">Código</label>
+      <input id="edit-codigo" autocomplete="off" />
+    </div>
+    <div class="form-grupo">
+      <label for="edit-desc">Descrição</label>
+      <textarea id="edit-desc"></textarea>
+    </div>
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
-      <button class="btn btn-primario" onclick="atualizarDisciplina('${id}')">Salvar</button>
+      <button class="btn btn-primario" onclick="salvarEdicaoDisciplina()">Salvar Alterações</button>
     </div>
   `);
+
+  // Preenche os campos de forma segura (via .value, nunca via innerHTML)
+  document.getElementById('edit-nome').value  = disc.nome    ?? '';
+  document.getElementById('edit-codigo').value = disc.codigo ?? '';
+  document.getElementById('edit-desc').value   = disc.descricao ?? '';
+  document.getElementById('edit-nome').focus();
 }
 
-async function atualizarDisciplina(id) {
+async function salvarEdicaoDisciplina() {
+  const disc = Estado.disciplinaEmEdicao;
+  if (!disc) { Modal.fechar(); return; }
+
   const nome   = document.getElementById('edit-nome')?.value.trim();
   const codigo = document.getElementById('edit-codigo')?.value.trim() || null;
   const desc   = document.getElementById('edit-desc')?.value.trim() || null;
-  if (!nome) { Toast.aviso('Informe o nome.'); return; }
+
+  if (!nome) {
+    _marcarErro('edit-nome', 'O nome é obrigatório.');
+    return;
+  }
+
+  const btn = document.querySelector('.modal-acoes .btn-primario');
+  _setBtnLoading(btn, true);
+
   try {
-    await API.patch(`/disciplinas/${id}`, { nome, codigo, descricao: desc });
-    Toast.sucesso('Disciplina atualizada!');
+    // PUT para substituição completa, conforme REST
+    await API.put(`/disciplinas/${disc.id}`, { nome, codigo, descricao: desc });
+    Toast.sucesso('Disciplina atualizada com sucesso!');
     Modal.fechar();
-    // Reload da view atual
+    Estado.disciplinaEmEdicao = null;
+    // Reload da view atual (mantém a rota)
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-  } catch (e) { Toast.erro(e.message); }
+  } catch (e) {
+    Toast.erro(e.message);
+  } finally {
+    _setBtnLoading(btn, false);
+  }
 }
 
 /* ── Excluir disciplina ── */
 function excluirDisciplina(id, nome) {
   Modal.abrir(`
     <h2 class="modal-titulo">Excluir Disciplina</h2>
-    <p>Tem certeza que deseja excluir <strong>${_esc(nome)}</strong>?<br>
-    Todos os materiais e consolidados associados serão removidos.</p>
+    <div style="background:var(--cor-erro-bg);border:1px solid #fecaca;border-radius:var(--raio);padding:14px;margin-bottom:16px">
+      <strong style="color:var(--cor-erro)">⚠ Atenção: esta ação é irreversível.</strong><br>
+      <span style="font-size:.875rem;color:var(--cinza-600)">
+        Todos os materiais, arquivos de transcrição e consolidados de
+        <strong>${_esc(nome)}</strong> serão permanentemente removidos.
+      </span>
+    </div>
+    <p style="font-size:.9rem;color:var(--cinza-600)">Digite o nome da disciplina para confirmar:</p>
+    <div class="form-grupo" style="margin-top:8px">
+      <input id="confirma-nome" placeholder="${_esc(nome)}" autocomplete="off" />
+    </div>
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
-      <button class="btn btn-perigo" onclick="confirmarExclusaoDisciplina('${id}')">Excluir</button>
+      <button class="btn btn-perigo" id="btn-confirma-excluir"
+        onclick="confirmarExclusaoDisciplina(${JSON.stringify(id)}, ${JSON.stringify(nome)})">
+        Excluir permanentemente
+      </button>
     </div>
   `);
+  document.getElementById('confirma-nome')?.focus();
 }
 
-async function confirmarExclusaoDisciplina(id) {
+async function confirmarExclusaoDisciplina(id, nome) {
+  const input = document.getElementById('confirma-nome')?.value.trim();
+  if (input !== nome) {
+    _marcarErro('confirma-nome', 'O nome não confere. Digite exatamente como exibido.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-confirma-excluir');
+  _setBtnLoading(btn, true);
+
   try {
     await API.delete(`/disciplinas/${id}`);
-    Toast.sucesso('Disciplina excluída.');
+    Toast.sucesso(`Disciplina "${nome}" excluída.`);
     Modal.fechar();
     App.navegar('home');
-  } catch (e) { Toast.erro(e.message); }
+  } catch (e) {
+    Toast.erro(e.message);
+    _setBtnLoading(btn, false);
+  }
 }
 
-/* ── Upload de material ── */
+/* ============================================================
+   Materiais
+   ============================================================ */
+
+/* ── Upload de arquivo ── */
 function abrirUpload(discId) {
   Modal.abrir(`
     <h2 class="modal-titulo">Enviar Material</h2>
@@ -422,11 +607,13 @@ function abrirUpload(discId) {
       <strong>Clique para selecionar</strong>
       <p>ou arraste e solte aqui</p>
       <p style="font-size:.78rem;margin-top:8px">Vídeo, Áudio, PDF, DOCX, PPTX, XLSX, TXT</p>
-      <input type="file" id="file-input" onchange="enviarArquivo('${discId}', this.files)"
+      <input type="file" id="file-input"
         accept=".mp4,.mkv,.avi,.mov,.webm,.m4v,.mp3,.wav,.m4a,.ogg,.flac,.aac,.pdf,.docx,.pptx,.xlsx,.doc,.ppt,.xls,.txt,.md" />
     </div>
     <div id="upload-status" style="margin-top:12px;display:none">
-      <div class="barra-progresso-container"><div class="barra-progresso" id="upload-barra" style="width:0%"></div></div>
+      <div class="barra-progresso-container">
+        <div class="barra-progresso" id="upload-barra" style="width:0%"></div>
+      </div>
       <p id="upload-msg" style="font-size:.85rem;margin-top:6px;color:var(--cinza-500)">Enviando…</p>
     </div>
     <div class="modal-acoes">
@@ -434,10 +621,13 @@ function abrirUpload(discId) {
     </div>
   `);
 
-  // Drag & drop
+  document.getElementById('file-input').addEventListener('change', e => {
+    enviarArquivo(discId, e.target.files);
+  });
+
   const zona = document.getElementById('zona-drop');
-  zona.addEventListener('dragover', e => { e.preventDefault(); zona.classList.add('drag-over'); });
-  zona.addEventListener('dragleave', () => zona.classList.remove('drag-over'));
+  zona.addEventListener('dragover',  e => { e.preventDefault(); zona.classList.add('drag-over'); });
+  zona.addEventListener('dragleave', ()  => zona.classList.remove('drag-over'));
   zona.addEventListener('drop', e => {
     e.preventDefault();
     zona.classList.remove('drag-over');
@@ -449,13 +639,14 @@ async function enviarArquivo(discId, files) {
   if (!files || files.length === 0) return;
   const file = files[0];
 
-  const status = document.getElementById('upload-status');
-  const barra  = document.getElementById('upload-barra');
-  const msg    = document.getElementById('upload-msg');
+  const statusEl = document.getElementById('upload-status');
+  const barra    = document.getElementById('upload-barra');
+  const msg      = document.getElementById('upload-msg');
 
-  if (status) {
-    status.style.display = 'block';
+  if (statusEl) {
+    statusEl.style.display = 'block';
     barra.style.width = '30%';
+    barra.style.background = 'var(--cor-primaria)';
     msg.textContent = `Enviando "${file.name}"…`;
   }
 
@@ -465,45 +656,43 @@ async function enviarArquivo(discId, files) {
   try {
     await API.upload(`/disciplinas/${discId}/materiais/upload`, form);
     if (barra) barra.style.width = '100%';
-    if (msg) msg.textContent = 'Enviado com sucesso!';
-    Toast.sucesso(`"${file.name}" enviado com sucesso.`);
+    if (msg)   msg.textContent = '✓ Enviado com sucesso!';
+    Toast.sucesso(`"${file.name}" enviado.`);
     setTimeout(() => {
       Modal.fechar();
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     }, 800);
   } catch (e) {
     if (barra) { barra.style.width = '100%'; barra.style.background = 'var(--cor-erro)'; }
-    if (msg) msg.textContent = `Erro: ${e.message}`;
+    if (msg)   msg.textContent = `Erro: ${e.message}`;
     Toast.erro(e.message);
   }
 }
 
-/* ── Processar/transcrever material ── */
+/* ── Transcrever/processar material ── */
 async function transcrever(discId, matId) {
   try {
     await API.post(`/disciplinas/${discId}/materiais/${matId}/transcrever`);
     Toast.info('Processamento iniciado em background.');
-    iniciarSSE(matId, discId);
+    _iniciarSSE(matId, discId);
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-  } catch (e) { Toast.erro(e.message); }
+  } catch (e) {
+    Toast.erro(e.message);
+  }
 }
 
-/* ── SSE: polling de progresso ── */
-function iniciarSSE(matId, discId) {
+/* ── SSE: atualizações de progresso em tempo real ── */
+function _iniciarSSE(matId, discId) {
   const url = `/api/v1/disciplinas/${discId}/materiais/${matId}/progresso`;
-  const es = new EventSource(url);
+  const es  = new EventSource(url);
 
   es.onmessage = (evt) => {
     let data;
     try { data = JSON.parse(evt.data); } catch (_) { return; }
 
-    const el = document.getElementById(`material-${matId}`);
-    if (!el) { es.close(); return; }
-
     if (data.status === 'CONCLUIDO' || data.status === 'ERRO' || data.status === 'REMOVIDO') {
       es.close();
-      // Reload para atualizar a view
-      setTimeout(() => window.dispatchEvent(new HashChangeEvent('hashchange')), 500);
+      setTimeout(() => window.dispatchEvent(new HashChangeEvent('hashchange')), 400);
     }
   };
 
@@ -514,10 +703,14 @@ function iniciarSSE(matId, discId) {
 function excluirMaterial(discId, matId, nome) {
   Modal.abrir(`
     <h2 class="modal-titulo">Excluir Material</h2>
-    <p>Remover <strong>${_esc(nome)}</strong>? O arquivo físico também será deletado.</p>
+    <p>Remover <strong>${_esc(nome)}</strong>?<br>
+    O arquivo físico e a transcrição (se houver) também serão deletados.</p>
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
-      <button class="btn btn-perigo" onclick="confirmarExclusaoMaterial('${discId}','${matId}')">Excluir</button>
+      <button class="btn btn-perigo"
+        onclick="confirmarExclusaoMaterial(${JSON.stringify(discId)},${JSON.stringify(matId)})">
+        Excluir
+      </button>
     </div>
   `);
 }
@@ -528,10 +721,15 @@ async function confirmarExclusaoMaterial(discId, matId) {
     Toast.sucesso('Material excluído.');
     Modal.fechar();
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-  } catch (e) { Toast.erro(e.message); }
+  } catch (e) {
+    Toast.erro(e.message);
+  }
 }
 
-/* ── Novo consolidado ── */
+/* ============================================================
+   Consolidados
+   ============================================================ */
+
 async function novoConsolidado(discId) {
   const disc = await API.get(`/disciplinas/${discId}`);
   const concluidos = disc.materiais.filter(m => m.status === 'CONCLUIDO');
@@ -541,44 +739,51 @@ async function novoConsolidado(discId) {
     return;
   }
 
-  const checkboxes = concluidos.map(m => `
-    <label class="item-check">
-      <input type="checkbox" value="${m.id}" data-tipo="${m.tipo}" />
-      <span class="item-check-label">${_icone_tipo(m.tipo)} ${_esc(m.nome_original)}</span>
-    </label>
-  `).join('');
-
   Modal.abrir(`
     <h2 class="modal-titulo">Gerar Consolidado</h2>
     <div class="form-grupo">
-      <label>Nome do arquivo *</label>
-      <input id="cons-nome" placeholder="Ex: Resumo Final Semestre" />
+      <label for="cons-nome">Nome do arquivo <span style="color:var(--cor-erro)">*</span></label>
+      <input id="cons-nome" placeholder="Ex: Resumo Final Semestre" autocomplete="off" />
     </div>
     <div class="form-grupo">
-      <label>Tipo</label>
+      <label for="cons-tipo">Tipo de saída</label>
       <select id="cons-tipo">
-        <option value="TXT">TXT (transcrições e textos)</option>
-        <option value="PDF">PDF (PDFs concatenados)</option>
+        <option value="TXT">TXT — transcrições e textos concatenados</option>
+        <option value="PDF">PDF — PDFs concatenados</option>
       </select>
     </div>
     <div class="form-grupo">
-      <label>Materiais a incluir *</label>
-      <div class="lista-check">${checkboxes}</div>
+      <label>Materiais a incluir <span style="color:var(--cor-erro)">*</span></label>
+      <div class="lista-check">
+        ${concluidos.map(m => `
+          <label class="item-check">
+            <input type="checkbox" value="${_esc(m.id)}" />
+            <span class="item-check-label">${_icone_tipo(m.tipo)} ${_esc(m.nome_original)}</span>
+          </label>`).join('')}
+      </div>
     </div>
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
-      <button class="btn btn-primario" onclick="gerarConsolidado('${discId}')">Gerar</button>
+      <button class="btn btn-primario" onclick="gerarConsolidado(${JSON.stringify(discId)})">
+        Gerar
+      </button>
     </div>
   `);
+  document.getElementById('cons-nome')?.focus();
 }
 
 async function gerarConsolidado(discId) {
   const nome = document.getElementById('cons-nome')?.value.trim();
   const tipo = document.getElementById('cons-tipo')?.value;
-  const selecionados = [...document.querySelectorAll('.lista-check input:checked')].map(c => c.value);
+  const selecionados = [
+    ...document.querySelectorAll('.lista-check input:checked')
+  ].map(c => c.value);
 
-  if (!nome) { Toast.aviso('Informe o nome do consolidado.'); return; }
+  if (!nome) { _marcarErro('cons-nome', 'Informe o nome do consolidado.'); return; }
   if (selecionados.length === 0) { Toast.aviso('Selecione ao menos um material.'); return; }
+
+  const btn = document.querySelector('.modal-acoes .btn-primario');
+  _setBtnLoading(btn, true);
 
   try {
     await API.post(`/disciplinas/${discId}/consolidados`, {
@@ -590,17 +795,22 @@ async function gerarConsolidado(discId) {
     Toast.sucesso('Consolidado gerado com sucesso!');
     Modal.fechar();
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-  } catch (e) { Toast.erro(e.message); }
+  } catch (e) {
+    Toast.erro(e.message);
+    _setBtnLoading(btn, false);
+  }
 }
 
-/* ── Excluir consolidado ── */
 function excluirConsolidado(discId, consId, nome) {
   Modal.abrir(`
     <h2 class="modal-titulo">Excluir Consolidado</h2>
-    <p>Remover <strong>${_esc(nome)}</strong>?</p>
+    <p>Remover <strong>${_esc(nome)}</strong>? O arquivo gerado será deletado.</p>
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
-      <button class="btn btn-perigo" onclick="confirmarExclusaoConsolidado('${discId}','${consId}')">Excluir</button>
+      <button class="btn btn-perigo"
+        onclick="confirmarExclusaoConsolidado(${JSON.stringify(discId)},${JSON.stringify(consId)})">
+        Excluir
+      </button>
     </div>
   `);
 }
@@ -611,8 +821,42 @@ async function confirmarExclusaoConsolidado(discId, consId) {
     Toast.sucesso('Consolidado excluído.');
     Modal.fechar();
     window.dispatchEvent(new HashChangeEvent('hashchange'));
-  } catch (e) { Toast.erro(e.message); }
+  } catch (e) {
+    Toast.erro(e.message);
+  }
 }
 
-/* ── Expõe para onclick HTML ── */
-window._esc = _esc;
+/* ============================================================
+   Helpers de UI
+   ============================================================ */
+
+/** Marca um campo com erro e exibe mensagem abaixo */
+function _marcarErro(inputId, mensagem) {
+  const input = document.getElementById(inputId);
+  if (!input) { Toast.aviso(mensagem); return; }
+  input.style.borderColor = 'var(--cor-erro)';
+  input.focus();
+  // Remove mensagem de erro anterior se existir
+  input.parentElement.querySelector('.erro-campo')?.remove();
+  const span = document.createElement('span');
+  span.className = 'erro-campo';
+  span.style.cssText = 'color:var(--cor-erro);font-size:.78rem;margin-top:2px';
+  span.textContent = mensagem;
+  input.parentElement.appendChild(span);
+  input.addEventListener('input', () => {
+    input.style.borderColor = '';
+    span.remove();
+  }, { once: true });
+}
+
+/** Estado de loading em botão */
+function _setBtnLoading(btn, loading) {
+  if (!btn) return;
+  btn.disabled = loading;
+  if (loading) {
+    btn.dataset.textoOriginal = btn.textContent;
+    btn.textContent = 'Aguarde…';
+  } else {
+    btn.textContent = btn.dataset.textoOriginal || btn.textContent;
+  }
+}
