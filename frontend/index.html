@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AcadeMind — Orientador Acadêmico</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- Cabeçalho global -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo" onclick="App.navegar('home')">
+        <span class="logo-icon">🎓</span>
+        <span class="logo-texto">AcadeMind</span>
+      </div>
+      <nav class="nav-global">
+        <button class="btn-nav" onclick="App.navegar('home')">Disciplinas</button>
+        <button class="btn-nav" onclick="App.navegar('logs')">Auditoria</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Conteúdo principal (SPA — substituído por JS) -->
+  <main id="app" class="container">
+    <div class="loading-inicial">
+      <div class="spinner"></div>
+      <p>Carregando AcadeMind...</p>
+    </div>
+  </main>
+
+  <!-- Toast de notificações -->
+  <div id="toast-container" aria-live="polite"></div>
+
+  <!-- Modal genérico -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="Modal.fechar()">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <button class="modal-fechar" onclick="Modal.fechar()" aria-label="Fechar">×</button>
+      <div id="modal-conteudo"></div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
