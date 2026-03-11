@@ -4,15 +4,14 @@ utils/storage.py — Helpers para gestão de arquivos em ./storage/.
 Estrutura de diretórios em storage/:
   storage/
     {disciplina_id}/
-      originais/   — arquivos enviados pelo usuário sem alteração
-      transcritos/ — TXTs gerados pela transcrição de vídeo/áudio
-      convertidos/ — PDFs gerados pela conversão de documentos Office
-      consolidados/— TXTs e PDFs consolidados
+      originais/    — arquivos enviados pelo usuário sem alteração
+      transcricoes/ — TXTs gerados pela transcrição de vídeo/áudio
+      convertidos/  — PDFs gerados pela conversão de documentos Office
+      consolidados/ — TXTs e PDFs consolidados
 
-Nenhum arquivo é sobrescrito silenciosamente: nomes são tornado únicos com UUID.
+Nenhum arquivo é sobrescrito silenciosamente: nomes são tornados únicos com UUID.
 """
 
-import shutil
 import uuid
 from pathlib import Path
 
@@ -35,8 +34,8 @@ def originais_dir(disciplina_id: str) -> Path:
     return _disciplina_dir(disciplina_id) / "originais"
 
 
-def transcritos_dir(disciplina_id: str) -> Path:
-    return _disciplina_dir(disciplina_id) / "transcritos"
+def transcricoes_dir(disciplina_id: str) -> Path:
+    return _disciplina_dir(disciplina_id) / "transcricoes"
 
 
 def convertidos_dir(disciplina_id: str) -> Path:
@@ -51,7 +50,7 @@ def garantir_diretorios(disciplina_id: str) -> None:
     """Cria todos os subdiretórios de uma disciplina se não existirem."""
     for d in [
         originais_dir(disciplina_id),
-        transcritos_dir(disciplina_id),
+        transcricoes_dir(disciplina_id),
         convertidos_dir(disciplina_id),
         consolidados_dir(disciplina_id),
     ]:
@@ -73,7 +72,7 @@ def salvar_upload(
     Retorna:
         (nome_armazenado, caminho_relativo_str, caminho_absoluto)
 
-    O nome armazenado inclui um UUID para evitar colisões de nomes.
+    O nome armazenado inclui um UUID curto para evitar colisões.
     O caminho relativo é relativo à raiz do projeto.
     """
     garantir_diretorios(disciplina_id)
@@ -86,11 +85,14 @@ def salvar_upload(
     return nome_armazenado, caminho_relativo, destino
 
 
-def caminho_transcricao(disciplina_id: str, nome_armazenado: str) -> Path:
-    """Retorna o Path onde o TXT de transcrição de um material será salvo."""
+def caminho_transcricao_material(disciplina_id: str, material_id: str) -> Path:
+    """
+    Retorna o Path canônico do TXT de transcrição de um material.
+    Usa o material_id como nome do arquivo para unicidade garantida.
+    Ex: storage/{disciplina_id}/transcricoes/{material_id}.txt
+    """
     garantir_diretorios(disciplina_id)
-    stem = Path(nome_armazenado).stem
-    return transcritos_dir(disciplina_id) / f"{stem}.txt"
+    return transcricoes_dir(disciplina_id) / f"{material_id}.txt"
 
 
 def caminho_convertido(disciplina_id: str, nome_armazenado: str) -> Path:
@@ -150,4 +152,4 @@ def _sanitize(nome: str) -> str:
     invalidos = r'\/:*?"<>|'
     for c in invalidos:
         nome = nome.replace(c, "_")
-    return nome.strip()[:100]  # Limita o tamanho para segurança
+    return nome.strip()[:100]
