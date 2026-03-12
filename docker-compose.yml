@@ -1,0 +1,87 @@
+# ============================================================
+# AcadeMind — docker-compose.yml
+#
+# Profiles disponíveis:
+#   (padrão) → CPU only
+#   gpu      → NVIDIA GPU via NVIDIA Container Toolkit
+#
+# Uso CPU:
+#   docker compose up
+#
+# Uso GPU (requer NVIDIA Container Toolkit no host):
+#   docker compose --profile gpu up
+#
+# Documentação: https://docs.nvidia.com/datacenter/cloud-native/
+# ============================================================
+
+services:
+
+  # ── Serviço principal (CPU) ──────────────────────────────
+  academind:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: academind:latest
+    container_name: academind
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      WHISPER_DEVICE: cpu
+      WHISPER_COMPUTE: int8
+    volumes:
+      # Dados persistentes — mantidos entre recriações do contêiner
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+      - ./academind.db:/app/academind.db
+      - ./config.json:/app/config.json
+      # Cache do modelo Whisper — evita re-download a cada rebuild
+      - whisper-cache:/app/.cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    profiles: ["default", ""]  # Ativo sem --profile
+
+  # ── Serviço com GPU NVIDIA ───────────────────────────────
+  academind-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: academind:latest
+    container_name: academind-gpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      WHISPER_DEVICE: cuda
+      WHISPER_COMPUTE: float16
+    volumes:
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+      - ./academind.db:/app/academind.db
+      - ./config.json:/app/config.json
+      - whisper-cache:/app/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    profiles: ["gpu"]
+
+volumes:
+  whisper-cache:
+    name: academind-whisper-cache
+    driver: local

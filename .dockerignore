@@ -1,0 +1,38 @@
+# ── Git ────────────────────────────────────────────────────
+.git
+.gitignore
+.claude/
+
+# ── Dados locais (montados como volumes) ───────────────────
+storage/
+logs/
+academind.db
+config.json
+
+# ── Caches e ambientes Python ──────────────────────────────
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.cache/
+
+# ── Whisper model cache ─────────────────────────────────────
+.cache/
+*.bin
+*.safetensors
+
+# ── Documentação e configurações de IDE ────────────────────
+README.md
+*.md
+.idea/
+.vscode/
+*.swp
+*.swo
