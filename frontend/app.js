@@ -235,6 +235,23 @@ const Estado = {
   disciplinaEmEdicao: null,  // objeto Disciplina completo durante edição
 };
 
+/* Extensões aceitas no frontend (espelho do backend _EXT_TIPO) */
+const _EXTS_VALIDAS = new Set([
+  'mp4','mkv','avi','mov','webm','m4v',          // vídeo
+  'mp3','wav','m4a','ogg','flac','aac',           // áudio
+  'docx','pptx','xlsx','doc','ppt','xls',         // Office
+  'odt','odp','ods',                              // LibreOffice
+  'pdf','txt','md',                               // diretos
+]);
+
+/* Tamanho máximo frontend (10 GB, replicado do default do backend) */
+let _TAMANHO_MAX_FRONTEND = 10 * 1024 ** 3;
+
+// Carrega o tamanho máximo da config ao iniciar
+fetch('/api/v1/config/').then(r => r.json()).then(cfg => {
+  if (cfg && cfg.tamanho_max_bytes) _TAMANHO_MAX_FRONTEND = cfg.tamanho_max_bytes;
+}).catch(() => {});
+
 /* ============================================================
    Utilitários
    ============================================================ */
@@ -318,11 +335,16 @@ const App = (() => {
         <div class="spinner"></div>
         <p>Carregando…</p>
       </div>`;
+    // Atualiza destaque do nav e breadcrumb
+    _atualizarNav(rota);
+    _atualizarBreadcrumb(rota, params);
+
     try {
       switch (rota) {
         case 'home':       await Views.home();                  break;
         case 'disciplina': await Views.disciplina(params.id);  break;
         case 'logs':       await Views.logs();                  break;
+        case 'config':     await Views.config();               break;
         default:           await Views.home();
       }
     } catch (err) {
@@ -335,8 +357,53 @@ const App = (() => {
     }
   }
 
+  function _atualizarNav(rota) {
+    const mapa = { home: 'nav-disciplinas', logs: 'nav-logs', config: 'nav-config', disciplina: 'nav-disciplinas' };
+    ['nav-disciplinas', 'nav-logs', 'nav-config'].forEach(id => {
+      document.getElementById(id)?.classList.remove('ativo');
+    });
+    const ativo = mapa[rota] || 'nav-disciplinas';
+    document.getElementById(ativo)?.classList.add('ativo');
+  }
+
+  function _atualizarBreadcrumb(rota, params) {
+    const bar = document.getElementById('breadcrumb-bar');
+    if (!bar) return;
+    const crumbs = { home: null, logs: 'Logs & Auditoria', config: 'Configurações', disciplina: null };
+    if (rota === 'home') {
+      bar.classList.add('hidden');
+      document.title = 'AcadeMind — Orientador Acadêmico';
+      return;
+    }
+    if (rota === 'disciplina') {
+      bar.classList.add('hidden'); // será atualizado dentro de Views.disciplina
+      return;
+    }
+    const label = crumbs[rota];
+    if (label) {
+      bar.innerHTML = `<span class="bc-link" onclick="App.navegar('home')">Início</span>
+        <span class="bc-sep">›</span><span class="bc-atual">${_esc(label)}</span>`;
+      bar.classList.remove('hidden');
+      document.title = `AcadeMind — ${label}`;
+    } else {
+      bar.classList.add('hidden');
+    }
+  }
+
   window.addEventListener('hashchange', renderizar);
-  window.addEventListener('DOMContentLoaded', renderizar);
+  window.addEventListener('DOMContentLoaded', () => {
+    renderizar();
+    // Ctrl+N — nova disciplina na tela home
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n' && !e.shiftKey) {
+        const { rota } = _parseHash();
+        if (rota === 'home') {
+          e.preventDefault();
+          novaDisciplina();
+        }
+      }
+    });
+  });
 
   return { navegar };
 })();
@@ -349,7 +416,19 @@ const Views = (() => {
 
   /* ── HOME: lista de disciplinas ── */
   async function home() {
+    document.title = 'AcadeMind — Orientador Acadêmico';
+    root().innerHTML = `
+      <div class="secao-header">
+        <div class="skeleton-block" style="height:32px;width:160px"></div>
+        <div class="skeleton-block" style="height:36px;width:140px"></div>
+      </div>
+      <div class="grid-disciplinas">
+        ${[1,2,3].map(() => `<div class="card-disciplina skeleton-block" style="height:140px"></div>`).join('')}
+      </div>`;
+
     const disciplinas = await API.get('/disciplinas/');
+
+    document.title = `AcadeMind — ${disciplinas.length} disciplina(s)`;
 
     let conteudo = '';
     if (disciplinas.length === 0) {
@@ -404,13 +483,29 @@ const Views = (() => {
   /* ── DISCIPLINA: materiais + consolidados ── */
   async function disciplina(id) {
     if (!id) { App.navegar('home'); return; }
+
+    // Skeleton enquanto carrega
+    root().innerHTML = `
+      <div class="skeleton-block" style="height:36px;width:280px;margin-bottom:16px"></div>
+      <div class="skeleton-block" style="height:56px;margin-bottom:12px"></div>
+      <div class="skeleton-block" style="height:320px"></div>`;
+
     const disc = await API.get(`/disciplinas/${id}`);
 
+    // Breadcrumb e título
+    const bar = document.getElementById('breadcrumb-bar');
+    if (bar) {
+      bar.innerHTML = `
+        <span class="bc-link" onclick="App.navegar('home')">Disciplinas</span>
+        <span class="bc-sep">›</span>
+        <span class="bc-atual">${_esc(disc.nome)}</span>`;
+      bar.classList.remove('hidden');
+    }
+    document.title = `AcadeMind — ${disc.nome}`;
+
     root().innerHTML = `
-      <div class="breadcrumb">
-        <span onclick="App.navegar('home')">Disciplinas</span> › <strong>${_esc(disc.nome)}</strong>
-      </div>
-      <div class="secao-header">
+      <div class="secao-header"  style="padding-top:0">
+      <div class="secao-header" style="padding-top:0">
         <div>
           <h1 class="secao-titulo">${_esc(disc.nome)}</h1>
           ${disc.codigo ? `<div style="font-size:.85rem;color:var(--cinza-400);font-family:var(--fonte-mono)">${_esc(disc.codigo)}</div>` : ''}
@@ -450,9 +545,15 @@ const Views = (() => {
     _setupZonaUploadInline(disc.id);
 
     // Conecta WS para materiais em processamento
-    disc.materiais
-      .filter(m => m.status === 'PROCESSANDO' || m.status === 'PENDENTE')
-      .forEach(m => WS.conectar(m.id));
+    const emProcessamento = disc.materiais.filter(
+      m => m.status === 'PROCESSANDO' || m.status === 'PENDENTE'
+    );
+    emProcessamento.forEach(m => WS.conectar(m.id));
+
+    // Título dinâmico quando há processamento em curso
+    if (emProcessamento.length > 0) {
+      document.title = `AcadeMind — Processando ${emProcessamento.length} arquivo(s)…`;
+    }
   }
 
   function _renderMateriais(materiais, discId) {
@@ -615,18 +716,317 @@ const Views = (() => {
   async function logs() {
     root().innerHTML = `
       <div class="secao-header">
-        <h1 class="secao-titulo">Log de Auditoria</h1>
+        <h1 class="secao-titulo">Logs &amp; Auditoria</h1>
       </div>
-      <div class="card">
-        <p style="color:var(--cinza-500)">
-          Os logs de auditoria são gravados em <code>logs/audit.log</code> na raiz do projeto.<br>
-          Um endpoint de consulta será adicionado em versão futura.
-        </p>
+      <div class="log-filtros skeleton-block" style="height:56px"></div>
+      <div class="skeleton-block" style="height:320px;margin-top:12px"></div>`;
+    await renderizarLogs(LogsView._filtros, LogsView._page);
+  }
+
+  /* ── CONFIG: configurações ── */
+  async function config() {
+    root().innerHTML = `
+      <div class="secao-header"><h1 class="secao-titulo">Configurações</h1></div>
+      <div class="skeleton-block" style="height:400px"></div>`;
+
+    let cfg, sistema;
+    try {
+      [cfg, sistema] = await Promise.all([
+        API.get('/config/'),
+        API.get('/config/sistema'),
+      ]);
+    } catch (e) {
+      root().innerHTML = `<div class="estado-vazio"><p>Erro ao carregar configurações: ${_esc(e.message)}</p></div>`;
+      return;
+    }
+
+    const cudaLabel = sistema.cuda
+      ? `<span class="badge badge-concluido">CUDA ativo ✓</span> ${_esc(sistema.cuda_info)}`
+      : `<span class="badge badge-pendente">CPU</span> ${_esc(sistema.cuda_info)}`;
+    const ffmpegLabel = sistema.ffmpeg
+      ? `<span class="badge badge-concluido">FFmpeg ✓</span>`
+      : `<span class="badge badge-erro">FFmpeg não encontrado ✕</span>`;
+    const libreLabel = sistema.libreoffice
+      ? `<span class="badge badge-concluido">LibreOffice ✓</span>`
+      : `<span class="badge badge-aviso">LibreOffice não encontrado ⚠</span>`;
+
+    const modelOpts = (cfg.modelos_disponiveis || [])
+      .map(m => {
+        const info = cfg.modelos_info?.[m] || {};
+        const descr = info.qualidade ? ` — ${info.qualidade}, ~${info.vram_gb}GB VRAM` : '';
+        const rec = m === 'large-v3' ? ' (Recomendado)' : '';
+        return `<option value="${_esc(m)}" ${m === cfg.whisper_model ? 'selected' : ''}>${_esc(m)}${_esc(descr)}${_esc(rec)}</option>`;
+      }).join('');
+
+    root().innerHTML = `
+      <div class="secao-header"><h1 class="secao-titulo">Configurações</h1></div>
+
+      <div class="config-grid">
+
+        <div class="card config-card">
+          <h2 class="config-secao-titulo">🖥 Sistema detectado</h2>
+          <table class="tabela-config-sistema">
+            <tr><td>GPU / Aceleração</td><td>${cudaLabel}</td></tr>
+            <tr><td>FFmpeg</td><td>${ffmpegLabel}</td></tr>
+            <tr><td>LibreOffice</td><td>${libreLabel}</td></tr>
+            <tr>
+              <td>Diretório de armazenamento</td>
+              <td><code style="font-size:.8rem">${_esc(sistema.storage_dir)}</code></td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="card config-card">
+          <h2 class="config-secao-titulo">🎙 Modelo Whisper</h2>
+          <p style="font-size:.82rem;color:var(--cinza-500);margin-bottom:12px">
+            <strong>large-v3</strong> é recomendado para melhor qualidade. Requer ~10 GB de VRAM.<br>
+            Modelos menores transcrevem mais rápido com menor precisão.
+          </p>
+          <div class="form-grupo">
+            <label for="cfg-modelo">Modelo ativo</label>
+            <select id="cfg-modelo">${modelOpts}</select>
+          </div>
+          <div class="modal-acoes" style="margin-top:8px">
+            <button class="btn btn-primario" onclick="salvarConfig()">Salvar modelo</button>
+            <button class="btn btn-secundario" id="btn-testar-transcricao"
+              onclick="testarTranscricao()">🔊 Testar transcrição</button>
+          </div>
+          <div id="cfg-resultado-teste" style="margin-top:12px"></div>
+        </div>
+
+        <div class="card config-card">
+          <h2 class="config-secao-titulo">📦 Tamanho máximo de upload</h2>
+          <div class="form-grupo">
+            <label for="cfg-tam-max">Limite por arquivo (GB)</label>
+            <input type="number" id="cfg-tam-max" min="0.1" max="100" step="0.5"
+              value="${(cfg.tamanho_max_bytes / 1024**3).toFixed(0)}" />
+          </div>
+          <div class="modal-acoes" style="margin-top:8px">
+            <button class="btn btn-primario" onclick="salvarConfig()">Salvar limite</button>
+          </div>
+        </div>
+
       </div>`;
   }
 
-  return { home, disciplina, logs };
+  return { home, disciplina, logs: () => logs(), config };
 })();
+
+/* ============================================================
+   LogsView — estado de filtros/paginação de logs (módulo global)
+   ============================================================ */
+const LogsView = {
+  _filtros: {},
+  _page: 1,
+  _refreshTimer: null,
+
+  _lerFiltros() {
+    return {
+      entidade:     document.getElementById('fil-entidade')?.value  || '',
+      status:       document.getElementById('fil-status')?.value    || '',
+      data_inicial: document.getElementById('fil-data-ini')?.value  || '',
+      data_final:   document.getElementById('fil-data-fim')?.value  || '',
+    };
+  },
+
+  aplicar() {
+    this._filtros = this._lerFiltros();
+    this._page = 1;
+    App.navegar('logs');
+  },
+
+  paginar(pag) {
+    this._page = pag;
+    App.navegar('logs');
+  },
+
+  limpar() {
+    this._filtros = {};
+    this._page = 1;
+    App.navegar('logs');
+  },
+
+  agendarRefresh() {
+    clearTimeout(this._refreshTimer);
+    this._refreshTimer = setTimeout(async () => {
+      const hash = window.location.hash.slice(1) || 'home';
+      if (!hash.startsWith('logs')) return;
+      await renderizarLogs(this._filtros, this._page);
+      this.agendarRefresh();
+    }, 10_000);
+  },
+};
+
+/* ============================================================
+   renderizarLogs — módulo-nível para compartilhar com LogsView
+   ============================================================ */
+async function renderizarLogs(filtros = {}, page = 1) {
+  const root = document.getElementById('app');
+  const params = new URLSearchParams({ page, limit: 50 });
+  if (filtros.entidade)     params.set('entidade',     filtros.entidade);
+  if (filtros.status)       params.set('status',       filtros.status);
+  if (filtros.data_inicial) params.set('data_inicial', filtros.data_inicial);
+  if (filtros.data_final)   params.set('data_final',   filtros.data_final);
+
+  const [itens, totObj] = await Promise.all([
+    API.get(`/logs/?${params}`),
+    API.get(`/logs/total?${params}`),
+  ]);
+  const total = totObj?.total ?? itens.length;
+  const totalPags = Math.max(1, Math.ceil(total / 50));
+
+  const exportParams = new URLSearchParams(params);
+  exportParams.delete('page'); exportParams.delete('limit');
+
+  const filEnt = filtros.entidade || '';
+  const filSts = filtros.status || '';
+
+  root.innerHTML = `
+    <div class="secao-header">
+      <h1 class="secao-titulo">Logs &amp; Auditoria</h1>
+      <div style="display:flex;gap:8px">
+        <a class="btn btn-secundario"
+           href="/api/v1/logs/exportar?formato=txt&${exportParams}"
+           download="academind_logs.txt">⬇ TXT</a>
+        <a class="btn btn-secundario"
+           href="/api/v1/logs/exportar?formato=json&${exportParams}"
+           download="academind_logs.json">⬇ JSON</a>
+      </div>
+    </div>
+
+    <div class="log-filtros">
+      <select id="fil-entidade" onchange="LogsView.aplicar()">
+        <option value="">Todas as entidades</option>
+        <option value="Disciplina"${filEnt === 'Disciplina' ? ' selected' : ''}>Disciplina</option>
+        <option value="Material"${filEnt === 'Material' ? ' selected' : ''}>Material</option>
+        <option value="Consolidado"${filEnt === 'Consolidado' ? ' selected' : ''}>Consolidado</option>
+        <option value="Sistema"${filEnt === 'Sistema' ? ' selected' : ''}>Sistema</option>
+      </select>
+      <select id="fil-status" onchange="LogsView.aplicar()">
+        <option value="">Todos os status</option>
+        <option value="OK"${filSts === 'OK' ? ' selected' : ''}>✅ OK</option>
+        <option value="ERRO"${filSts === 'ERRO' ? ' selected' : ''}>❌ Erro</option>
+        <option value="INFO"${filSts === 'INFO' ? ' selected' : ''}>ℹ Info</option>
+      </select>
+      <input type="date" id="fil-data-ini" title="Data inicial"
+        value="${_esc(filtros.data_inicial || '')}" onchange="LogsView.aplicar()" />
+      <input type="date" id="fil-data-fim" title="Data final"
+        value="${_esc(filtros.data_final || '')}" onchange="LogsView.aplicar()" />
+      <button class="btn btn-sm btn-secundario" onclick="LogsView.limpar()">✕ Limpar</button>
+    </div>
+
+    <div class="log-info-bar">
+      ${total} registro(s) · Página ${page} de ${totalPags}
+    </div>
+
+    ${itens.length === 0
+      ? `<div class="estado-vazio"><div class="icone">📋</div><p>Nenhum log para os filtros selecionados.</p></div>`
+      : `<div class="tabela-logs-wrapper">
+           <table class="tabela-logs">
+             <thead>
+               <tr>
+                 <th style="width:150px">Timestamp</th>
+                 <th>Entidade</th>
+                 <th>Ação</th>
+                 <th style="width:70px">Status</th>
+                 <th style="width:80px"></th>
+               </tr>
+             </thead>
+             <tbody>${itens.map(_renderLinhaLog).join('')}</tbody>
+           </table>
+         </div>`
+    }
+
+    <div class="paginacao">
+      <button class="btn btn-sm btn-secundario" ${page <= 1 ? 'disabled' : ''}
+        onclick="LogsView.paginar(${page - 1})">← Anterior</button>
+      <span style="font-size:.85rem;color:var(--cinza-500)">${page} / ${totalPags}</span>
+      <button class="btn btn-sm btn-secundario" ${page >= totalPags ? 'disabled' : ''}
+        onclick="LogsView.paginar(${page + 1})">Próxima →</button>
+    </div>`;
+
+  LogsView._filtros = filtros;
+  LogsView._page = page;
+  LogsView.agendarRefresh();
+}
+
+function _renderLinhaLog(log) {
+  const ts = new Date(log.criado_em).toLocaleString('pt-BR');
+  const cls = { OK: 'badge-concluido', ERRO: 'badge-erro', INFO: 'badge-pendente' }[log.status] || '';
+  const det = log.detalhes ? JSON.stringify(log.detalhes, null, 2) : '{}';
+  const detId = `log-det-${log.id}`;
+  return `
+    <tr>
+      <td style="font-size:.74rem;font-family:var(--fonte-mono);white-space:nowrap">${_esc(ts)}</td>
+      <td>
+        <span style="font-size:.8rem">${_esc(log.entidade)}</span>
+        ${log.entidade_id
+          ? `<br><span style="font-size:.68rem;color:var(--cinza-400);font-family:var(--fonte-mono)">${_esc(log.entidade_id.slice(0,8))}…</span>`
+          : ''}
+      </td>
+      <td style="font-size:.82rem">${_esc(log.acao)}</td>
+      <td><span class="badge ${cls}" style="font-size:.68rem">${_esc(log.status)}</span></td>
+      <td>
+        <button class="btn btn-sm btn-secundario" style="font-size:.7rem;padding:2px 6px"
+          onclick="document.getElementById('${detId}').classList.toggle('visivel')">
+          Detalhes
+        </button>
+        <pre class="log-detalhe" id="${detId}">${_esc(det)}</pre>
+      </td>
+    </tr>`;
+}
+
+/* ============================================================
+   Configurações — salvar e testar transcrição
+   ============================================================ */
+async function salvarConfig() {
+  const modelo    = document.getElementById('cfg-modelo')?.value;
+  const tamGbStr  = document.getElementById('cfg-tam-max')?.value;
+  const tamGb     = tamGbStr ? parseFloat(tamGbStr) : null;
+
+  const payload = {};
+  if (modelo)  payload.whisper_model   = modelo;
+  if (tamGb)   payload.tamanho_max_gb  = tamGb;
+
+  try {
+    await API.patch('/config/', payload);
+    // Atualiza limite de upload frontend
+    if (tamGb) _TAMANHO_MAX_FRONTEND = tamGb * 1024 ** 3;
+    Toast.sucesso('Configurações salvas.');
+  } catch (e) {
+    Toast.erro(e.message);
+  }
+}
+
+async function testarTranscricao() {
+  const btn = document.getElementById('btn-testar-transcricao');
+  const resEl = document.getElementById('cfg-resultado-teste');
+  _setBtnLoading(btn, true);
+  if (resEl) resEl.innerHTML = `<p style="font-size:.82rem;color:var(--cinza-400)">Carregando modelo e transcrevendo (pode levar alguns segundos)…</p>`;
+
+  try {
+    const r = await API.post('/config/testar-transcricao');
+    if (resEl) {
+      if (r.sucesso) {
+        resEl.innerHTML = `
+          <div style="background:var(--cor-sucesso-bg);border:1px solid #bbf7d0;border-radius:var(--raio);padding:10px 14px;font-size:.82rem;color:var(--cor-sucesso)">
+            ✅ Transcrição de teste concluída em <strong>${r.tempo_segundos}s</strong>
+            · Idioma detectado: <strong>${_esc(r.idioma_detectado)}</strong>
+            · Modelo: <strong>${_esc(r.modelo_usado)}</strong>
+          </div>`;
+      } else {
+        resEl.innerHTML = `
+          <div style="background:var(--cor-erro-bg);border:1px solid #fecaca;border-radius:var(--raio);padding:10px 14px;font-size:.82rem;color:var(--cor-erro)">
+            ❌ Falha no teste: ${_esc(r.erro || r.mensagem)}
+          </div>`;
+      }
+    }
+  } catch (e) {
+    if (resEl) resEl.innerHTML = `<p style="color:var(--cor-erro);font-size:.82rem">Erro: ${_esc(e.message)}</p>`;
+  } finally {
+    _setBtnLoading(btn, false);
+  }
+}
 
 /* ============================================================
    Tabs (acessível via onclick inline)
@@ -835,6 +1235,22 @@ function _setupZonaUploadInline(discId) {
 function _onFilesSelected(discId, files) {
   if (!files || files.length === 0) return;
   const arr = Array.from(files);
+
+  // Validação frontend: extensão e tamanho
+  const invalidos = [];
+  for (const f of arr) {
+    const ext = (f.name.split('.').pop() || '').toLowerCase();
+    if (!_EXTS_VALIDAS.has(ext)) {
+      invalidos.push(`"${f.name}": extensão .${ext} não suportada.`);
+    } else if (f.size > _TAMANHO_MAX_FRONTEND) {
+      const limGB = (_TAMANHO_MAX_FRONTEND / 1024 ** 3).toFixed(0);
+      invalidos.push(`"${f.name}": excede o limite de ${limGB} GB.`);
+    }
+  }
+  if (invalidos.length > 0) {
+    Toast.erro(invalidos.join('\n'), 8000);
+    return;
+  }
 
   // Exibe lista de arquivos selecionados
   const listaEl = document.getElementById('upload-lista-inline');

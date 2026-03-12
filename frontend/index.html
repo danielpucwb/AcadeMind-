@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AcadeMind — Orientador Acadêmico</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -15,11 +16,15 @@
         <span class="logo-texto">AcadeMind</span>
       </div>
       <nav class="nav-global">
-        <button class="btn-nav" onclick="App.navegar('home')">Disciplinas</button>
-        <button class="btn-nav" onclick="App.navegar('logs')">Auditoria</button>
+        <button class="btn-nav" id="nav-disciplinas" onclick="App.navegar('home')">Disciplinas</button>
+        <button class="btn-nav" id="nav-logs" onclick="App.navegar('logs')">Logs &amp; Auditoria</button>
+        <button class="btn-nav" id="nav-config" onclick="App.navegar('config')">Configurações</button>
       </nav>
     </div>
   </header>
+
+  <!-- Breadcrumb -->
+  <div id="breadcrumb-bar" class="breadcrumb-bar hidden"></div>
 
   <!-- Conteúdo principal (SPA — substituído por JS) -->
   <main id="app" class="container">

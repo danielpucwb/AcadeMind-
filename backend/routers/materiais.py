@@ -65,7 +65,11 @@ _EXT_TIPO: dict[str, TipoMaterial] = {
 }
 
 _TIPOS_SEM_PROCESSAMENTO = {TipoMaterial.PDF, TipoMaterial.TXT}
-_TAMANHO_MAX = 4 * 1024 ** 3  # 4 GB
+
+# Tamanho máximo lido da config em tempo de execução (padrão 10 GB)
+def _tamanho_max() -> int:
+    from backend.utils.config import get_tamanho_max
+    return get_tamanho_max()
 
 
 def _detectar_tipo(nome: str) -> TipoMaterial:
@@ -80,6 +84,36 @@ def _detectar_tipo(nome: str) -> TipoMaterial:
             ),
         )
     return tipo
+
+
+# ---------------------------------------------------------------------------
+# Helpers internos
+# ---------------------------------------------------------------------------
+
+async def _nome_unico(db: AsyncSession, disciplina_id: str, nome_original: str) -> str:
+    """
+    Garante que o nome_original seja único dentro da disciplina.
+    Se já existir, acrescenta sufixo numérico: 'arquivo.mp4' → 'arquivo (2).mp4'.
+    """
+    from pathlib import Path as _Path
+    stem = _Path(nome_original).stem
+    ext  = _Path(nome_original).suffix
+
+    candidato = nome_original
+    contador = 2
+    while True:
+        existe = await db.execute(
+            select(Material)
+            .where(
+                Material.disciplina_id == disciplina_id,
+                Material.nome_original == candidato,
+            )
+            .limit(1)
+        )
+        if existe.scalar_one_or_none() is None:
+            return candidato
+        candidato = f"{stem} ({contador}){ext}"
+        contador += 1
 
 
 # ---------------------------------------------------------------------------
@@ -172,11 +206,16 @@ async def upload_materiais(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Arquivo '{nome}' está vazio.",
             )
-        if len(conteudo) > _TAMANHO_MAX:
+        limite = _tamanho_max()
+        if len(conteudo) > limite:
+            limite_gb = limite / 1024 ** 3
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"Arquivo '{nome}' excede o limite de 4 GB.",
+                detail=f"Arquivo '{nome}' excede o limite de {limite_gb:.0f} GB configurado.",
             )
+
+        # Garante nome original único dentro da disciplina (sufixo numérico se duplicado)
+        nome = await _nome_unico(db, disciplina_id, nome)
 
         nome_armazenado, caminho_relativo, _ = salvar_upload(
             conteudo=conteudo,

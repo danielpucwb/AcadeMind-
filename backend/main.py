@@ -8,6 +8,7 @@ Responsabilidades:
   - Incluir os routers da API em "/api/v1"
   - Endpoint WebSocket para progresso em tempo real
   - Inicializar o banco de dados na startup
+  - Executar verificações de ambiente (FFmpeg, LibreOffice, CUDA)
 """
 
 import logging
@@ -20,8 +21,10 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.database import init_db
 from backend.routers import disciplinas
+from backend.routers.config import router as config_router
 from backend.routers.consolidados import router as consolidados_router
 from backend.routers.consolidados import router_flat as consolidados_flat_router
+from backend.routers.logs import router as logs_router
 from backend.routers.materiais import router_disc, router_mat
 from backend.utils.progresso import manager as progresso_manager
 
@@ -51,11 +54,27 @@ async def lifespan(app: FastAPI):
     # Startup
     _STORAGE_DIR.mkdir(exist_ok=True)
     _LOGS_DIR.mkdir(exist_ok=True)
+
     logger.info("Inicializando banco de dados...")
     await init_db()
-    logger.info("Banco de dados inicializado. AcadeMind pronto.")
+    logger.info("Banco de dados inicializado.")
+
+    # Verificações de ambiente (não bloqueia se algo faltar)
+    from backend.utils.startup_checks import executar_todas
+    checks = executar_todas()
+    if not checks["ffmpeg"]:
+        logger.error(
+            "ATENÇÃO: FFmpeg não encontrado. Upload de vídeo/áudio falhará. "
+            "Instale FFmpeg e reinicie o servidor."
+        )
+    if not checks["libreoffice"]:
+        logger.warning(
+            "LibreOffice não encontrado. Conversão de documentos Office para PDF indisponível."
+        )
+
+    logger.info("AcadeMind pronto para receber requisições.")
     yield
-    # Shutdown (sem ações necessárias)
+    # Shutdown
     logger.info("AcadeMind encerrado.")
 
 
@@ -93,11 +112,13 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 API_PREFIX = "/api/v1"
 
-app.include_router(disciplinas.router,      prefix=API_PREFIX)
-app.include_router(router_disc,             prefix=API_PREFIX)
-app.include_router(router_mat,             prefix=API_PREFIX)
-app.include_router(consolidados_router,    prefix=API_PREFIX)
-app.include_router(consolidados_flat_router, prefix=API_PREFIX)
+app.include_router(disciplinas.router,        prefix=API_PREFIX)
+app.include_router(router_disc,               prefix=API_PREFIX)
+app.include_router(router_mat,                prefix=API_PREFIX)
+app.include_router(consolidados_router,       prefix=API_PREFIX)
+app.include_router(consolidados_flat_router,  prefix=API_PREFIX)
+app.include_router(logs_router,               prefix=API_PREFIX)
+app.include_router(config_router,             prefix=API_PREFIX)
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +135,6 @@ async def ws_progresso(websocket: WebSocket, material_id: str):
     """
     await progresso_manager.connect(material_id, websocket)
     try:
-        # Mantém a conexão aberta aguardando mensagens do cliente (heartbeat/ping)
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

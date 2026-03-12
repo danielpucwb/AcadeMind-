@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.database import get_db
-from backend.models import Disciplina, StatusAudit
+from backend.models import Disciplina, Material, StatusAudit, StatusMaterial
 from backend.schemas import (
     DisciplinaComMateriais,
     DisciplinaCreate,
@@ -228,6 +228,24 @@ async def excluir_disciplina(
     """
     disciplina = await _get_ou_404(db, disciplina_id)
     nome = disciplina.nome
+
+    # Bloqueia exclusão se houver materiais em processamento
+    processando = await db.execute(
+        select(Material)
+        .where(
+            Material.disciplina_id == disciplina_id,
+            Material.status == StatusMaterial.PROCESSANDO,
+        )
+        .limit(1)
+    )
+    if processando.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Não é possível excluir a disciplina enquanto há materiais sendo processados. "
+                "Aguarde a conclusão ou cancele o processamento antes de excluir."
+            ),
+        )
 
     await log_auditoria(
         db=db,
