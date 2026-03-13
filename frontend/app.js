@@ -1388,18 +1388,21 @@ async function novoConsolidado(discId) {
     )
   );
 
+  // Abre na aba mais relevante: PDF se não há TXT elegíveis, senão TXT
+  const abaInicial = txtElegiveis.length === 0 && pdfElegiveis.length > 0 ? 'pdf' : 'txt';
+
   Modal.abrir(`
     <h2 class="modal-titulo" style="margin-bottom:12px">Consolidar Arquivos</h2>
       <div class="modal-tabs" id="cons-tabs">
-        <button class="modal-tab-btn ativo" onclick="trocarTabCons('txt')">📄 Consolidar TXT</button>
-        <button class="modal-tab-btn"       onclick="trocarTabCons('pdf')">📑 Consolidar PDF</button>
-        <button class="modal-tab-btn"       onclick="trocarTabCons('gerados')">📋 Gerados (${disc.consolidados.length})</button>
+        <button class="modal-tab-btn ${abaInicial === 'txt' ? 'ativo' : ''}" onclick="trocarTabCons('txt')">📄 Consolidar TXT</button>
+        <button class="modal-tab-btn ${abaInicial === 'pdf' ? 'ativo' : ''}" onclick="trocarTabCons('pdf')">📑 Consolidar PDF</button>
+        <button class="modal-tab-btn" onclick="trocarTabCons('gerados')">📋 Gerados (${disc.consolidados.length})</button>
       </div>
 
-      <div id="cons-painel-txt">
+      <div id="cons-painel-txt" ${abaInicial !== 'txt' ? 'style="display:none"' : ''}>
         ${_renderPainelTxt(txtElegiveis, discId)}
       </div>
-      <div id="cons-painel-pdf" style="display:none">
+      <div id="cons-painel-pdf" ${abaInicial !== 'pdf' ? 'style="display:none"' : ''}>
         ${_renderPainelPdf(pdfElegiveis, discId)}
       </div>
       <div id="cons-painel-gerados" style="display:none">
