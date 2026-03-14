@@ -260,6 +260,10 @@ function _esc(str) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+// Escapa valor para uso em onclick="func('${_jsArg(x)}')" — evita conflito de aspas
+function _jsArg(val) {
+  return String(val ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
 
 function _icone_tipo(tipo) {
   const map = { VIDEO: '🎬', AUDIO: '🎵', PDF: '📄', DOCUMENTO: '📝', TXT: '📃' };
@@ -468,11 +472,11 @@ const Views = (() => {
           </button>
           <div class="rodape-acoes">
             <button class="btn btn-sm btn-secundario"
-              onclick="event.stopPropagation(); editarDisciplina(${JSON.stringify(_esc(d.id))})">
+              onclick="event.stopPropagation(); editarDisciplina('${_jsArg(d.id)}')">
               ✏️ Editar
             </button>
             <button class="btn btn-sm btn-perigo"
-              onclick="event.stopPropagation(); excluirDisciplina(${JSON.stringify(_esc(d.id))}, ${JSON.stringify(_esc(d.nome))})">
+              onclick="event.stopPropagation(); excluirDisciplina('${_jsArg(d.id)}', '${_jsArg(d.nome)}')">
               🗑
             </button>
           </div>
@@ -513,15 +517,15 @@ const Views = (() => {
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-secundario" onclick="App.navegar('home')">← Voltar</button>
           <button class="btn btn-secundario"
-            onclick="novoConsolidado(${JSON.stringify(_esc(disc.id))})">
+            onclick="novoConsolidado('${_jsArg(disc.id)}')">
             🗂 Consolidar Arquivos
           </button>
           <button class="btn btn-secundario"
-            onclick="editarDisciplina(${JSON.stringify(_esc(disc.id))})">
+            onclick="editarDisciplina('${_jsArg(disc.id)}')">
             ✏️ Editar
           </button>
           <button class="btn btn-perigo"
-            onclick="excluirDisciplina(${JSON.stringify(_esc(disc.id))}, ${JSON.stringify(_esc(disc.nome))})">
+            onclick="excluirDisciplina('${_jsArg(disc.id)}', '${_jsArg(disc.nome)}')">
             🗑 Excluir
           </button>
         </div>
@@ -651,12 +655,12 @@ const Views = (() => {
               title="Baixar transcrição TXT">📄 Transcrição</a>` : ''}
           ${erro ? `
             <button class="btn btn-sm btn-secundario"
-              onclick="reprocessarMaterial(${JSON.stringify(_esc(m.id))})">
+              onclick="reprocessarMaterial('${_jsArg(m.id)}')">
               ↺ Tentar novamente
             </button>` : ''}
           <button class="btn btn-sm btn-perigo"
             ${processando ? 'disabled title="Aguarde o processamento terminar"' : ''}
-            onclick="excluirMaterial(${JSON.stringify(_esc(discId))},${JSON.stringify(_esc(m.id))},${JSON.stringify(_esc(m.nome_original))})">
+            onclick="excluirMaterial('${_jsArg(discId)}','${_jsArg(m.id)}','${_jsArg(m.nome_original)}')">
             🗑
           </button>
         </div>
@@ -665,7 +669,7 @@ const Views = (() => {
 
   function _renderConsolidados(consolidados, discId) {
     const addBtn = `
-      <button class="btn btn-primario" onclick="novoConsolidado(${JSON.stringify(_esc(discId))})">
+      <button class="btn btn-primario" onclick="novoConsolidado('${_jsArg(discId)}')">
         🗂 Gerar Consolidado
       </button>`;
 
@@ -700,7 +704,7 @@ const Views = (() => {
                download="${_esc(c.nome)}"
                title="Baixar arquivo consolidado">⬇ Baixar</a>
             <button class="btn btn-sm btn-perigo"
-              onclick="excluirConsolidado(${JSON.stringify(_esc(c.id))},${JSON.stringify(_esc(c.nome))})">
+              onclick="excluirConsolidado('${_jsArg(c.id)}','${_jsArg(c.nome)}')">
               🗑
             </button>
           </div>
@@ -1176,7 +1180,7 @@ function excluirDisciplina(id, nome) {
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
       <button class="btn btn-perigo" id="btn-confirma-excluir"
-        onclick="confirmarExclusaoDisciplina(${JSON.stringify(id)}, ${JSON.stringify(nome)})">
+        onclick="confirmarExclusaoDisciplina('${_jsArg(id)}', '${_jsArg(nome)}')">
         Excluir permanentemente
       </button>
     </div>
@@ -1334,7 +1338,7 @@ function excluirMaterial(discId, matId, nome) {
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="Modal.fechar()">Cancelar</button>
       <button class="btn btn-perigo"
-        onclick="confirmarExclusaoMaterial(${JSON.stringify(discId)},${JSON.stringify(matId)})">
+        onclick="confirmarExclusaoMaterial('${_jsArg(discId)}','${_jsArg(matId)}')">
         Excluir
       </button>
     </div>
@@ -1453,7 +1457,7 @@ function _renderPainelTxt(elegiveis, discId) {
     </div>
     <div id="cons-txt-resultado"></div>
     <button class="btn btn-primario" style="width:100%" id="btn-gerar-txt"
-      onclick="gerarConsolidadoTxt(${JSON.stringify(discId)})">
+      onclick="gerarConsolidadoTxt('${_jsArg(discId)}')">
       Gerar TXT Consolidado
     </button>`;
 }
@@ -1516,7 +1520,7 @@ function _renderPainelPdf(elegiveis, discId) {
     </div>
     <div id="cons-pdf-resultado"></div>
     <button class="btn btn-primario" style="width:100%" id="btn-gerar-pdf"
-      onclick="gerarConsolidadoPdf(${JSON.stringify(discId)})">
+      onclick="gerarConsolidadoPdf('${_jsArg(discId)}')">
       Gerar PDF Consolidado
     </button>`;
 }
@@ -1571,7 +1575,7 @@ function _renderPainelGerados(consolidados) {
                download="${_esc(c.nome)}"
                title="Baixar arquivo">⬇</a>
             <button class="btn btn-sm btn-perigo"
-              onclick="excluirConsolidado(${JSON.stringify(_esc(c.id))},${JSON.stringify(_esc(c.nome))})">
+              onclick="excluirConsolidado('${_jsArg(c.id)}','${_jsArg(c.nome)}')">
               🗑
             </button>
           </div>
@@ -1683,7 +1687,7 @@ function excluirConsolidado(consId, nome) {
     <div class="modal-acoes">
       <button class="btn btn-secundario" onclick="abrirModalConsolidacao()">Cancelar</button>
       <button class="btn btn-perigo"
-        onclick="confirmarExclusaoConsolidado(${JSON.stringify(consId)})">
+        onclick="confirmarExclusaoConsolidado('${_jsArg(consId)}')">
         Excluir
       </button>
     </div>
